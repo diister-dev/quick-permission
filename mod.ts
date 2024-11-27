@@ -1,15 +1,23 @@
-// Permission hierarchy
+/**
+ * Represents a hierarchical structure of permissions where each key maps to a PermissionElement
+ */
 export type PermissionHierarchy = Record<string, PermissionElement>;
 
+/**
+ * Represents a single element in the permission hierarchy
+ */
 export type PermissionElement = {
-    // Hierarchy
+    /** Nested permission hierarchy */
     children?: PermissionHierarchy
-    // Local
-    check?: (state: any) => boolean, // Check if the permission state is valid
-    allowed?: (request: any, state: any | undefined) => Promise<boolean> | boolean // Check if the permission request is valid
+    /** Function to validate the permission state */
+    check?: (state: any) => boolean,
+    /** Function to check if the permission request is allowed */
+    allowed?: (request: any, state: any | undefined) => Promise<boolean> | boolean
 }
 
-// Permission Keys
+/**
+ * Maps a permission hierarchy to dot-notation permission strings
+ */
 export type Permission<T extends PermissionHierarchy> = {
     [K in keyof T]: DeepName<T[K], K>
 }[keyof T];
@@ -20,28 +28,41 @@ type DeepName<T, K> = K extends string ?
     : never
     : never;
 
+/**
+ * Flattens a nested permission hierarchy into a single-level structure
+ */
 export type FlatPermissionHierarchy<T extends PermissionHierarchy> = {
     [K in Permission<T>]: PermissionValue<T, K>;
 };
 
-// Permission value
+/**
+ * Extracts the permission value type from a hierarchy and permission key
+ */
 export type PermissionValue<H extends PermissionHierarchy, K> = K extends `${infer HEAD}.${infer TAIL}` ?
     H[HEAD] extends PermissionElement ?
-    H[HEAD]["children"] extends PermissionHierarchy ?
-    PermissionValue<H[HEAD]["children"], TAIL> : HEAD
+    H[HEAD]["children"] extends PermissionHierarchy ? PermissionValue<H[HEAD]["children"], TAIL> : HEAD
     : never
     : K extends string ?
     H[K] extends PermissionElement ? H[K] : never
     : never;
 
+/**
+ * Extracts the request type for a permission element
+ */
 type PermissionRequest<T> = T extends PermissionElement ?
     T['allowed'] extends (request: infer R, state: any) => Promise<boolean> | boolean ? R : never
     : never;
 
+/**
+ * Extracts the state type for a permission element
+ */
 type PermissionState<T> = T extends PermissionElement ?
     T['allowed'] extends (request: any, state: infer R) => Promise<boolean> | boolean ? R : boolean
     : never;
 
+/**
+ * Represents child permission requests in a hierarchical structure
+ */
 export type RequestsChild<T> = T extends PermissionHierarchy ?
     {
         [K in keyof FlatPermissionHierarchy<T>]: {
@@ -52,13 +73,24 @@ export type RequestsChild<T> = T extends PermissionHierarchy ?
     }[keyof FlatPermissionHierarchy<T>]
     : never;
 
-// Permission state
+/**
+ * Represents a set of permissions with their associated states
+ */
 export type PermissionSet<T extends Record<string, PermissionElement>> = Partial<Record<Permission<T>, any>>;
+
+/**
+ * Represents a strictly typed set of permissions with their states
+ */
 export type PermissionStrictSet<T extends Record<string, PermissionElement>> = Partial<{
     [K in Permission<T>]: PermissionState<PermissionValue<T, K>>;
 }>;
 
-// Module
+/**
+ * Validates a permission against a permission set and returns all matching permission keys
+ * @param permission - The permission to validate
+ * @param permissionSet - The set of permissions to validate against
+ * @returns An array of matched permission keys
+ */
 export function validateBy<T extends PermissionHierarchy, V extends Permission<T>>(
     permission: V,
     permissionSet: PermissionSet<T>,
@@ -102,24 +134,46 @@ function flatPermissionHierarchy<T extends PermissionHierarchy>(
     return globalFlat as FlatPermissionHierarchy<T>;
 }
 
+/**
+ * Interface for the permission hierarchy handler
+ */
 type PermissionHierarchyElement<T extends PermissionHierarchy> = {
-    validate: <V extends Permission<T>>(
+    /**
+     * Checks if a permission request is allowed
+     * @param permission - The permission to check
+     * @param permissionSet - The set of permissions to check against
+     * @param params - Optional request parameters
+     * @returns A promise that resolves to true if the permission is allowed
+     */
+    can: <V extends Permission<T>>(
         permission: V,
         permissionSet: PermissionSet<T> | PermissionSet<T>[],
         ...params: PermissionRequest<PermissionValue<T, V>> extends never ? [] : [PermissionRequest<PermissionValue<T, V>>]
     ) => Promise<boolean>;
-    check: <V extends Permission<T>>(
+
+    /**
+     * Validates a permission state
+     * @param key - The permission key to validate
+     * @param params - Optional state parameters
+     * @returns True if the state is valid
+     */
+    checkState: <V extends Permission<T>>(
         key: V,
         ...params: PermissionState<PermissionValue<T, V>> extends never ? [] : [PermissionState<PermissionValue<T, V>>]
     ) => boolean;
 };
 
+/**
+ * Creates a permission hierarchy handler with methods to check and validate permissions
+ * @param hierarchy - The permission hierarchy to create a handler for
+ * @returns An object with methods to check and validate permissions
+ */
 export function createPermissionHierarchy<T extends PermissionHierarchy>(hierarchy: T): PermissionHierarchyElement<T> {
     const flatten = flatPermissionHierarchy(hierarchy);
 
     return {
         // Validate if a key is validated by a permission set
-        validate: async <V extends Permission<T>>(
+        can: async <V extends Permission<T>>(
             permission: V,
             permissionSet: PermissionSet<T> | PermissionSet<T>[],
             ...params: PermissionRequest<PermissionValue<T, V>> extends never ? [] : [PermissionRequest<PermissionValue<T, V>>]
@@ -164,7 +218,7 @@ export function createPermissionHierarchy<T extends PermissionHierarchy>(hierarc
             return false;
         },
         // Check permission state for a given key
-        check: <V extends Permission<T>>(
+        checkState: <V extends Permission<T>>(
             key: V,
             ...params: PermissionState<PermissionValue<T, V>> extends never ? [] : [PermissionState<PermissionValue<T, V>>]
         ) => {
