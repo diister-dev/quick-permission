@@ -12,7 +12,7 @@ export type PermissionElement = {
     /** Function to validate the permission state */
     check?: (state: any) => boolean,
     /** Function to check if the permission request is allowed */
-    allowed?: (request: any, state: any | undefined) => Promise<boolean> | boolean
+    allowed?: (request: any, state: any | undefined) => boolean
 }
 
 /**
@@ -50,14 +50,14 @@ export type PermissionValue<H extends PermissionHierarchy, K> = K extends `${inf
  * Extracts the request type for a permission element
  */
 type PermissionRequest<T> = T extends PermissionElement ?
-    T['allowed'] extends (request: infer R, state: any) => Promise<boolean> | boolean ? R : never
+    T['allowed'] extends (request: infer R, state: any) => boolean ? R : never
     : never;
 
 /**
  * Extracts the state type for a permission element
  */
 type PermissionState<T> = T extends PermissionElement ?
-    T['allowed'] extends (request: any, state: infer R) => Promise<boolean> | boolean ? R : boolean
+    T['allowed'] extends (request: any, state: infer R) => boolean ? R : boolean
     : never;
 
 /**
@@ -143,13 +143,13 @@ type PermissionHierarchyElement<T extends PermissionHierarchy> = {
      * @param permission - The permission to check
      * @param permissionSet - The set of permissions to check against
      * @param params - Optional request parameters
-     * @returns A promise that resolves to true if the permission is allowed
+     * @returns A boolean that resolves to true if the permission is allowed
      */
     can: <V extends Permission<T>>(
         permission: V,
         permissionSet: PermissionSet<T> | PermissionSet<T>[],
         ...params: PermissionRequest<PermissionValue<T, V>> extends never ? [] : [PermissionRequest<PermissionValue<T, V>>]
-    ) => Promise<boolean>;
+    ) => boolean;
 
     /**
      * Validates a permission state
@@ -173,7 +173,7 @@ export function createPermissionHierarchy<T extends PermissionHierarchy>(hierarc
 
     return {
         // Validate if a key is validated by a permission set
-        can: async <V extends Permission<T>>(
+        can: <V extends Permission<T>>(
             permission: V,
             permissionSet: PermissionSet<T> | PermissionSet<T>[],
             ...params: PermissionRequest<PermissionValue<T, V>> extends never ? [] : [PermissionRequest<PermissionValue<T, V>>]
@@ -201,7 +201,7 @@ export function createPermissionHierarchy<T extends PermissionHierarchy>(hierarc
                             request,
                         };
 
-                        if (await hierarchyElement?.allowed(localRequest, set[key])) {
+                        if (hierarchyElement?.allowed(localRequest, set[key])) {
                             return true;
                         }
                     }
@@ -210,7 +210,7 @@ export function createPermissionHierarchy<T extends PermissionHierarchy>(hierarc
 
             // No permission found, check with empty state
             if (hierarchyElement.allowed) {
-                if (await hierarchyElement?.allowed(request, undefined)) {
+                if (hierarchyElement?.allowed(request, undefined)) {
                     return true;
                 }
             }
