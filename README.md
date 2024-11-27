@@ -95,7 +95,7 @@ const userPermissions = {
 };
 
 // Check permissions
-await permissions.validate(
+await permissions.can(
     "file.read", 
     userPermissions, 
     { user: 'user1', path: ['home', 'user1', 'document.txt'] }
@@ -154,7 +154,7 @@ const articlesPermissions = {
 1. **Request Object**
    - Contains the context needed for permission validation
    - Can include user information, resource details, timestamps, etc.
-   - Passed when checking permissions with `validate()`
+   - Passed when checking permissions with `can()`
    ```typescript
    const request = { 
        from: 'user1',
