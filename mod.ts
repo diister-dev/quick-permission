@@ -62,9 +62,9 @@ export type PermissionStrictSet<T extends Record<string, PermissionElement>> = P
 export function validateBy<T extends PermissionHierarchy, V extends Permission<T>>(
     permission: V,
     permissionSet: PermissionSet<T>,
-) {
+) : Permission<T>[] {
     const splitted = permission.split(".");
-    const matched: any[] = [];
+    const matched: string[] = [];
     let accumulator = "";
     for (let i = 0; i < splitted.length; i++) {
         accumulator += (i !== 0 ? "." : "") + splitted[i];
@@ -73,7 +73,7 @@ export function validateBy<T extends PermissionHierarchy, V extends Permission<T
         matched.push(accumulator);
     }
 
-    return matched;
+    return matched as Permission<T>[];
 }
 
 /**
@@ -102,7 +102,19 @@ function flatPermissionHierarchy<T extends PermissionHierarchy>(
     return globalFlat as FlatPermissionHierarchy<T>;
 }
 
-export function createPermissionHierarchy<T extends PermissionHierarchy>(hierarchy: T) {
+type PermissionHierarchyElement<T extends PermissionHierarchy> = {
+    validate: <V extends Permission<T>>(
+        permission: V,
+        permissionSet: PermissionSet<T> | PermissionSet<T>[],
+        ...params: PermissionRequest<PermissionValue<T, V>> extends never ? [] : [PermissionRequest<PermissionValue<T, V>>]
+    ) => Promise<boolean>;
+    check: <V extends Permission<T>>(
+        key: V,
+        ...params: PermissionState<PermissionValue<T, V>> extends never ? [] : [PermissionState<PermissionValue<T, V>>]
+    ) => boolean;
+};
+
+export function createPermissionHierarchy<T extends PermissionHierarchy>(hierarchy: T): PermissionHierarchyElement<T> {
     const flatten = flatPermissionHierarchy(hierarchy);
 
     return {
