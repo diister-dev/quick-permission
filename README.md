@@ -95,7 +95,7 @@ const userPermissions = {
 };
 
 // Check permissions
-await permissions.can(
+permissions.can(
     "file.read", 
     userPermissions, 
     { user: 'user1', path: ['home', 'user1', 'document.txt'] }
