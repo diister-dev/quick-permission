@@ -12,7 +12,9 @@ export type PermissionElement = {
     /** Function to validate the permission state */
     check?: (state: any) => boolean,
     /** Function to check if the permission request is allowed */
-    allowed?: (request: any, state: any | undefined) => boolean
+    allowed?: (request: any, state: any) => boolean
+    /** Function to intercept permission destinated to children */
+    intercept?: (intercepted: { key: string, request: any, state: any }, state: any) => boolean
 }
 
 /**
@@ -195,23 +197,21 @@ export function createPermissionHierarchy<T extends PermissionHierarchy>(hierarc
                     if (hierarchyElement.allowed) {
                         const scopedPermission = permission.slice(key.length + 1) as V;
 
-                        const localRequest = key === permission ? request : {
-                            type: "child",
-                            key: scopedPermission,
-                            request,
-                        };
-
-                        if (hierarchyElement?.allowed(localRequest, set[key])) {
-                            return true;
+                        if (key == permission) {
+                            if (hierarchyElement.allowed(request, set[key])) {
+                                return true;
+                            }
+                        } else if (hierarchyElement.intercept) {
+                            const state = set[key];
+                            if(hierarchyElement.intercept({
+                                key: scopedPermission,
+                                request,
+                                state: set[key]
+                            }, state)) {
+                                return true;
+                            }
                         }
                     }
-                }
-            }
-
-            // No permission found, check with empty state
-            if (hierarchyElement.allowed) {
-                if (hierarchyElement?.allowed(request, undefined)) {
-                    return true;
                 }
             }
 
