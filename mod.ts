@@ -10,7 +10,9 @@ export type PermissionElement = {
     /** Nested permission hierarchy */
     children?: PermissionHierarchy
     /** Function to validate the permission state */
-    check?: (state: any) => boolean,
+    checkState?: (state: any) => boolean,
+    /** Function to validate the permission request */
+    checkRequest?: (request: any) => boolean
     /** Function to check if the permission request is allowed */
     allowed?: (request: any, state: any) => boolean
     /** Function to intercept permission destinated to children */
@@ -186,6 +188,12 @@ export function createPermissionHierarchy<T extends PermissionHierarchy>(hierarc
             const hierarchyElement = flatten[permission] as PermissionElement;
             if (!hierarchyElement) throw new Error("Invalid key request");
 
+            const validRequest = hierarchyElement.checkRequest?.(request) ?? true;
+            if (!validRequest) throw new Error("Invalid request");
+
+            const validState = hierarchyElement.checkState?.(request) ?? true;
+            if (!validState) throw new Error("Invalid state");
+
             for (const set of permissionsSet) {
                 const validated = validateBy(permission, set) as V[];
                 if (validated.length == 0) continue;
@@ -194,22 +202,20 @@ export function createPermissionHierarchy<T extends PermissionHierarchy>(hierarc
                     const hierarchyElement = flatten[key] as PermissionElement;
                     if (!hierarchyElement) throw new Error("Invalid key request");
 
-                    if (hierarchyElement.allowed) {
-                        const scopedPermission = permission.slice(key.length + 1) as V;
+                    const scopedPermission = permission.slice(key.length + 1) as V;
 
-                        if (key == permission) {
-                            if (hierarchyElement.allowed(request, set[key])) {
-                                return true;
-                            }
-                        } else if (hierarchyElement.intercept) {
-                            const state = set[key];
-                            if(hierarchyElement.intercept({
-                                key: scopedPermission,
-                                request,
-                                state: set[key]
-                            }, state)) {
-                                return true;
-                            }
+                    if (key == permission) {
+                        if (hierarchyElement.allowed?.(request, set[key])) {
+                            return true;
+                        }
+                    } else if (hierarchyElement.intercept) {
+                        const state = set[key];
+                        if (hierarchyElement.intercept({
+                            key: scopedPermission,
+                            request,
+                            state: set[key]
+                        }, state)) {
+                            return true;
                         }
                     }
                 }
@@ -226,8 +232,8 @@ export function createPermissionHierarchy<T extends PermissionHierarchy>(hierarc
             const hierarchyElement = flatten[key] as PermissionElement;
             if (!hierarchyElement) throw new Error("Invalid key request");
 
-            if (hierarchyElement.check) {
-                return hierarchyElement.check?.(state);
+            if (hierarchyElement.checkState) {
+                return hierarchyElement.checkState?.(state);
             }
 
             return typeof state === 'boolean';
