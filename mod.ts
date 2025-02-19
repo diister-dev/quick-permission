@@ -156,6 +156,19 @@ type PermissionHierarchyElement<T extends PermissionHierarchy> = {
     ) => boolean;
 
     /**
+     * Checks if a permission request is allowed
+     * @param permission - The permission to check
+     * @param permissionSet - The set of permissions to check against
+     * @param params - Optional request parameters
+     * @returns A boolean that resolves to true if the permission is allowed
+     */
+    canSafe: <V extends Permission<T>>(
+        permission: V,
+        permissionSet: PermissionSet<T> | PermissionSet<T>[],
+        ...params: PermissionRequest<PermissionValue<T, V>> extends never ? [] : [PermissionRequest<PermissionValue<T, V>>]
+    ) => boolean
+
+    /**
      * Validates a permission state
      * @param key - The permission key to validate
      * @param params - Optional state parameters
@@ -175,68 +188,86 @@ type PermissionHierarchyElement<T extends PermissionHierarchy> = {
 export function createPermissionHierarchy<T extends PermissionHierarchy>(hierarchy: T): PermissionHierarchyElement<T> {
     const flatten = flatPermissionHierarchy(hierarchy);
 
-    return {
-        // Validate if a key is validated by a permission set
-        can: <V extends Permission<T>>(
-            permission: V,
-            permissionSet: PermissionSet<T> | PermissionSet<T>[],
-            ...params: PermissionRequest<PermissionValue<T, V>> extends never ? [] : [PermissionRequest<PermissionValue<T, V>>]
-        ) => {
-            const [request] = params;
-            const permissionsSet = Array.isArray(permissionSet) ? permissionSet : [permissionSet];
+    // Validate if a key is validated by a permission set
+    function can<V extends Permission<T>>(
+        permission: V,
+        permissionSet: PermissionSet<T> | PermissionSet<T>[],
+        ...params: PermissionRequest<PermissionValue<T, V>> extends never ? [] : [PermissionRequest<PermissionValue<T, V>>]
+    ) {
+        const [request] = params;
+        const permissionsSet = Array.isArray(permissionSet) ? permissionSet : [permissionSet];
 
-            const hierarchyElement = flatten[permission] as PermissionElement;
-            if (!hierarchyElement) throw new Error("Invalid key request");
+        const hierarchyElement = flatten[permission] as PermissionElement;
+        if (!hierarchyElement) throw new Error("Invalid key request");
 
-            const validRequest = hierarchyElement.checkRequest?.(request) ?? true;
-            if (!validRequest) throw new Error("Invalid request");
+        const validRequest = hierarchyElement.checkRequest?.(request) ?? true;
+        if (!validRequest) throw new Error("Invalid request");
 
-            const validState = hierarchyElement.checkState?.(request) ?? true;
-            if (!validState) throw new Error("Invalid state");
+        for (const set of permissionsSet) {
+            const validated = validateBy(permission, set) as V[];
+            if (validated.length == 0) continue;
 
-            for (const set of permissionsSet) {
-                const validated = validateBy(permission, set) as V[];
-                if (validated.length == 0) continue;
+            for (const key of validated) {
+                const hierarchyElement = flatten[key] as PermissionElement;
+                if (!hierarchyElement) throw new Error("Invalid key request");
 
-                for (const key of validated) {
-                    const hierarchyElement = flatten[key] as PermissionElement;
-                    if (!hierarchyElement) throw new Error("Invalid key request");
+                const scopedPermission = permission.slice(key.length + 1) as V;
 
-                    const scopedPermission = permission.slice(key.length + 1) as V;
+                const state = set[key];
+                const validState = hierarchyElement.checkState?.(state) ?? true;
+                if (!validState) throw new Error("Invalid state");
 
-                    if (key == permission) {
-                        if (hierarchyElement.allowed?.(request, set[key])) {
-                            return true;
-                        }
-                    } else if (hierarchyElement.intercept) {
-                        const state = set[key];
-                        if (hierarchyElement.intercept({
-                            key: scopedPermission,
-                            request,
-                            state: set[key]
-                        }, state)) {
-                            return true;
-                        }
+                if (key == permission) {
+                    if (hierarchyElement.allowed?.(request, state)) {
+                        return true;
+                    }
+                } else if (hierarchyElement.intercept) {
+                    const state = set[key];
+                    if (hierarchyElement.intercept({
+                        key: scopedPermission,
+                        request,
+                        state
+                    }, state)) {
+                        return true;
                     }
                 }
             }
-
-            return false;
-        },
-        // Check permission state for a given key
-        checkState: <V extends Permission<T>>(
-            key: V,
-            ...params: PermissionState<PermissionValue<T, V>> extends never ? [] : [PermissionState<PermissionValue<T, V>>]
-        ) => {
-            const [state] = params;
-            const hierarchyElement = flatten[key] as PermissionElement;
-            if (!hierarchyElement) throw new Error("Invalid key request");
-
-            if (hierarchyElement.checkState) {
-                return hierarchyElement.checkState?.(state);
-            }
-
-            return typeof state === 'boolean';
         }
+
+        return false;
+    }
+
+    function canSafe<V extends Permission<T>>(
+        permission: V,
+        permissionSet: PermissionSet<T> | PermissionSet<T>[],
+        ...params: PermissionRequest<PermissionValue<T, V>> extends never ? [] : [PermissionRequest<PermissionValue<T, V>>]
+    ) {
+        try {
+            return can(permission, permissionSet, ...params);
+        } catch {
+            return false;
+        }
+    }
+
+    // Check permission state for a given key
+    function checkState<V extends Permission<T>>(
+        key: V,
+        ...params: PermissionState<PermissionValue<T, V>> extends never ? [] : [PermissionState<PermissionValue<T, V>>]
+    ) {
+        const [state] = params;
+        const hierarchyElement = flatten[key] as PermissionElement;
+        if (!hierarchyElement) throw new Error("Invalid key request");
+
+        if (hierarchyElement.checkState) {
+            return hierarchyElement.checkState?.(state);
+        }
+
+        return typeof state === 'boolean';
+    }
+
+    return {
+        can,
+        canSafe,
+        checkState,
     }
 }
