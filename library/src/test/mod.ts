@@ -4,11 +4,11 @@ import { allowOwner } from "../rules/allowOwner/allowOwner.ts";
 import { allowTarget } from "../rules/allowTarget/allowTarget.ts";
 import { allowSelf } from "../rules/allowSelf/allowSelf.ts";
 import { denySelf } from "../rules/denySelf/denySelf.ts";
-import { Schema } from "../types/schema.ts";
+import { Schema, SchemasRequests } from "../types/schema.ts";
 import { time } from "../schemas/time/time.ts";
 import { Rule } from "../types/rule.ts";
 import { hierarchy, permission, validate } from "../core/permission.ts";
-import { PermissionKey } from "../types/common.ts";
+import { PermissionElement, PermissionKey, PermissionRequestSet, PermissionStates, PermissionStateSet } from "../types/common.ts";
 import { not } from "../operators/operations.ts";
 import { ensureTime } from "../rules/ensureTime/ensureTime.ts";
 
@@ -73,15 +73,18 @@ const permissions = hierarchy({
                     C: {
                         D: permission({
                             schemas: [target(), owner(), time()],
-                            rules: [ensureTime(), allowTarget()],
+                            rules: [allowTarget(), allowOwner(), ensureTime()],
                             children: {
                                 F: permission({
                                     schemas: [target(), owner()],
-                                    rules: [allowOwner()],
+                                    rules: [allowTarget(), allowOwner()],
                                 }),
                             }
                         }),
-                        E: permission({}),
+                        E: permission({
+                            schemas: [target(), owner()],
+                            rules: [allowTarget(), allowOwner()],
+                        }),
                     }
                 }
             }),
@@ -89,7 +92,7 @@ const permissions = hierarchy({
     }),
 })
 
-const states = [
+const states: PermissionStateSet<typeof permissions>[] = [
     {
         "A.B.C.D": {
             target: ["owner:123"],
@@ -101,13 +104,16 @@ const states = [
     {
         "A.B.C.D.F": {
             target: [],
+        },
+        "A.B.C.E": {
+            target: ["owner:123"],
         }
     }
 ]
 
-const result = validate(states, permissions, "A.B.C.D.F", {
-    from: "B",
-    owner: "A",
+const result = validate(permissions, states, "A.B.C.D.F", {
+    from: "owner",
     target: "owner:123",
+    owner: "owner:123",
 });
 console.log(result, "->", !!result);

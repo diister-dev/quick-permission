@@ -1,4 +1,4 @@
-import type { Hierarchy, Permission, PermissionHierarchy } from "../types/common.ts";
+import type { Hierarchy, Permission, PermissionHierarchy, PermissionKey, PermissionRequests, PermissionStateSet } from "../types/common.ts";
 import type { Rule } from "../types/rule.ts";
 import type { Schema, SchemasRequests, SchemasStates } from "../types/schema.ts";
 
@@ -8,13 +8,17 @@ export function permission<
         SchemasStates<S>,
         SchemasRequests<S>
     >[],
-    const C extends Hierarchy | undefined,
->(content: Partial<Omit<Permission<S, R, C>, "type">>): Permission<S, R, C> {
+    const C extends Hierarchy,
+>(content: {
+    schemas?: S,
+    rules?: R,
+    children?: C,
+}): Permission<S, R, C> {
     return {
         type: "permission",
-        schemas: content.schemas ?? [] as unknown as S,
-        rules: content.rules ?? [] as unknown as R,
-        children: content.children,
+        schemas: (content.schemas ?? []) as S,
+        rules: (content.rules ?? []) as R,
+        children: content.children as C,
     }
 }
 
@@ -69,22 +73,26 @@ function flatHierarchy(hierarchy: Hierarchy) {
     return flat;
 }
 
-export function hierarchy<const H extends Hierarchy>(hierarchy: H) {
+export function hierarchy<const H extends Hierarchy>(hierarchy: H): PermissionHierarchy<H> {
     const flat = flatHierarchy(hierarchy);
     const keys = Object.keys(flat);
 
     return {
+        type: "hierarchy",
         hierarchy,
         flat,
         keys,
     };
 }
 
-export function satisfiedBy(
-    key: string,
-    hierarchy: any,
+export function satisfiedBy<
+    H extends PermissionHierarchy<any>,
+    K extends PermissionKey<H>,
+>(
+    hierarchy: H,
+    key: K,
 ) {
-    const matching: string[] = [];
+    const matching: PermissionKey<H>[] = [];
     let traverseKey = key;
     let seperatorIndex = traverseKey.lastIndexOf(".");
 
@@ -100,7 +108,7 @@ export function satisfiedBy(
         matching.unshift(traverseKey);
         
         seperatorIndex = traverseKey.lastIndexOf(".");
-        traverseKey = traverseKey.substring(0, seperatorIndex);
+        traverseKey = traverseKey.substring(0, seperatorIndex) as K;
     }
 
     return matching;
@@ -132,8 +140,13 @@ function mergeValidations(validations: (boolean | undefined)[]) {
     return merged;
 }
 
-export function validate(states: any[], hierarchy: any, key: string, request: any) {
-    const satisfier = satisfiedBy(key, hierarchy);
+export function validate<
+    H extends PermissionHierarchy<any>,
+    S extends PermissionStateSet<H>[],
+    K extends PermissionKey<H>,
+    R extends PermissionRequests<H, K>,
+>(hierarchy: H, states: S, key: K, request: R) {
+    const satisfier = satisfiedBy(hierarchy, key);
     const stateValidations: (boolean | undefined)[] = [];
 
     for (const state of states) {
