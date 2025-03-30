@@ -7,8 +7,10 @@ import { denySelf } from "../rules/denySelf/denySelf.ts";
 import { Schema } from "../types/schema.ts";
 import { time } from "../schemas/time/time.ts";
 import { Rule } from "../types/rule.ts";
-import { permission } from "../core/permission.ts";
+import { hierarchy, permission, validate } from "../core/permission.ts";
 import { PermissionKey } from "../types/common.ts";
+import { not } from "../operators/operations.ts";
+import { ensureTime } from "../rules/ensureTime/ensureTime.ts";
 
 type AllowerStates<T> = T extends [infer A, ...infer B] ?
     B extends [] ?
@@ -46,36 +48,66 @@ function allow<const A extends Schema<any, any>[]>(schemas: A, rules: Rule<Allow
     }
 }
 
-const allower = allow([target(), owner(), time()], [allowTarget({ wildcards: true }), allowOwner(), denySelf()]);
+// const allower = allow([target(), owner(), time()], [allowTarget({ wildcards: true }), allowOwner(), denySelf()]);
 
-const value = allower.makeRequest({
-    dateStart: new Date(),
-    dateEnd: new Date(new Date().getTime() + 1000 * 60 * 60 * 24 * 7), // 1 week
-    target: ["user:*"],
-}, {
-    from: "owner",
-    target: "user:pouet",
-    owner: "pouet",
+// const value = allower.makeRequest({
+//     dateStart: new Date(),
+//     dateEnd: new Date(new Date().getTime() + 1000 * 60 * 60 * 24 * 7), // 1 week
+//     target: ["user:*"],
+// }, {
+//     from: "owner",
+//     target: "user:pouet",
+//     owner: "pouet",
+// })
+
+// console.log(value);
+
+const permissions = hierarchy({
+    A: permission({
+        schemas: [owner()],
+        children: {
+            B: permission({
+                schemas: [owner()],
+                rules: [allowOwner()],
+                children: {
+                    C: {
+                        D: permission({
+                            schemas: [target(), owner(), time()],
+                            rules: [ensureTime(), allowTarget()],
+                            children: {
+                                F: permission({
+                                    schemas: [target(), owner()],
+                                    rules: [allowOwner()],
+                                }),
+                            }
+                        }),
+                        E: permission({}),
+                    }
+                }
+            }),
+        }
+    }),
 })
 
-console.log(value);
-
-const a = permission({
-    schemas: [target(), owner(), time()],
-    rules: [allowOwner()],
-    children: {
-        pouet: permission({
-            schemas: [owner()],
-            rules: [allowOwner()],
-            children: {
-                pouet2: permission({
-                    schemas: [owner()],
-                    rules: [allowOwner()],
-                    children: undefined,
-                })
-            }
-        })
+const states = [
+    {
+        "A.B.C.D": {
+            target: ["owner:123"],
+        },
+        "A.B.C.D.F": {
+            target: [],
+        }
+    },
+    {
+        "A.B.C.D.F": {
+            target: [],
+        }
     }
-})
+]
 
-const b: PermissionKey<typeof a> = "pouet.pouet2"
+const result = validate(states, permissions, "A.B.C.D.F", {
+    from: "B",
+    owner: "A",
+    target: "owner:123",
+});
+console.log(result, "->", !!result);

@@ -1,12 +1,6 @@
+import type { TargetRequest, TargetState } from "../../schemas/target/target.ts";
 import type { Rule } from "../../types/rule.ts";
 
-type AllowTargetState = {
-    target: string[];
-}
-
-type AllowTargetRequest = {
-    target: string;
-}
 
 export interface AllowTargetOptions {
     /**
@@ -22,7 +16,7 @@ export interface AllowTargetOptions {
     wildcardChar?: string;
 }
 
-export function allowTarget(options: AllowTargetOptions = {}): Rule<AllowTargetState, AllowTargetRequest> {
+export function allowTarget(options: AllowTargetOptions = {}): Rule<TargetState, TargetRequest> {
     const wildcards = options.wildcards ?? false;
     const wildcardChar = options.wildcardChar ?? "*";
     
