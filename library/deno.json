@@ -2,5 +2,5 @@
     "name": "@diister/quick-permission",
     "version": "0.4.0",
     "license": "MIT",
-    "exports": "./library/mod.ts"
+    "exports": "./mod.ts"
 }
