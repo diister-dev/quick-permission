@@ -1,119 +1,74 @@
-import { target } from "../schemas/target/target.ts";
-import { owner } from "../schemas/owner/owner.ts";
 import { allowOwner } from "../rules/allowOwner/allowOwner.ts";
 import { allowTarget } from "../rules/allowTarget/allowTarget.ts";
 import { allowSelf } from "../rules/allowSelf/allowSelf.ts";
 import { denySelf } from "../rules/denySelf/denySelf.ts";
-import { Schema, SchemasRequests } from "../types/schema.ts";
-import { time } from "../schemas/time/time.ts";
-import { Rule } from "../types/rule.ts";
 import { hierarchy, permission, validate } from "../core/permission.ts";
-import { PermissionElement, PermissionKey, PermissionRequestSet, PermissionStates, PermissionStateSet } from "../types/common.ts";
+import { PermissionStateSet } from "../types/common.ts";
 import { not } from "../operators/operations.ts";
 import { ensureTime } from "../rules/ensureTime/ensureTime.ts";
+import { TimeState } from "../schemas/time/time.ts";
+import { target, TargetState } from "../schemas/target/target.ts";
+import { Rule } from "../types/rule.ts";
 
-type AllowerStates<T> = T extends [infer A, ...infer B] ?
-    B extends [] ?
-    A extends Schema<infer State, any> ? State : never
-    : A extends Schema<infer State, any> ? State & AllowerStates<B> : never
-    : never;
-
-type AllowerRequests<T> = T extends [infer A, ...infer B] ?
-    B extends [] ?
-    A extends Schema<any, infer Request> ? Request : never
-    : A extends Schema<any, infer Request> ? Request & AllowerRequests<B> : never
-    : never;
-
-function allow<const A extends Schema<any, any>[]>(schemas: A, rules: Rule<AllowerStates<A>, AllowerRequests<A>>[]) {
-    function makeRequest(state: AllowerStates<A>, request: AllowerRequests<A>): boolean {
-        for (const rule of schemas) {
-            console.debug(`Checking rule ${rule.name}`);
-            if (rule.state && !rule.state(state)) return false;
-            if (rule.request && !rule.request(request)) return false;
-        }
-        
-        let anyExplicitAllow = false;
-        for (const rule of rules) {
-            console.debug(`Checking rule ${rule.name}`);
-            const result = rule.check(state, request);
-            if (result === false) return false;
-            if (result === true) anyExplicitAllow = true;
-        }
-
-        return anyExplicitAllow;
-    }
-
-    return {
-        makeRequest,
-    }
-}
-
-// const allower = allow([target(), owner(), time()], [allowTarget({ wildcards: true }), allowOwner(), denySelf()]);
-
-// const value = allower.makeRequest({
-//     dateStart: new Date(),
-//     dateEnd: new Date(new Date().getTime() + 1000 * 60 * 60 * 24 * 7), // 1 week
-//     target: ["user:*"],
-// }, {
-//     from: "owner",
-//     target: "user:pouet",
-//     owner: "pouet",
-// })
-
-// console.log(value);
+const rules = <const>[allowTarget({ wildcards: true }), ensureTime()] satisfies Rule[];
 
 const permissions = hierarchy({
-    A: permission({
-        schemas: [owner()],
+    user: permission({
+        rules,
         children: {
-            B: permission({
-                schemas: [owner()],
-                rules: [allowOwner()],
-                children: {
-                    C: {
-                        D: permission({
-                            schemas: [target(), owner(), time()],
-                            rules: [allowTarget(), allowOwner(), ensureTime()],
-                            children: {
-                                F: permission({
-                                    schemas: [target(), owner()],
-                                    rules: [allowTarget(), allowOwner()],
-                                }),
-                            }
-                        }),
-                        E: permission({
-                            schemas: [target(), owner()],
-                            rules: [allowTarget(), allowOwner()],
-                        }),
-                    }
-                }
+            create: permission({
+                rules: [...rules, allowTarget({ wildcards: true })],
+            }),
+            view: permission({
+                rules: [...rules, allowSelf()],
+            }),
+            update: permission({
+                rules: [...rules, allowSelf()],
+            }),
+            delete: permission({
+                rules: [...rules, denySelf()],
             }),
         }
     }),
 })
 
+const defaultPermissions: PermissionStateSet<typeof permissions> = {
+    "user.view" : {
+        target: [],
+    },
+    "user.delete": {
+        target: []
+    },
+    "user.update": {
+        target: []
+    },
+} 
+
 const states: PermissionStateSet<typeof permissions>[] = [
     {
-        "A.B.C.D": {
-            target: ["owner:123"],
+        ...defaultPermissions,
+        "user" :{
+            target: ["user:D*"],
         },
-        "A.B.C.D.F": {
-            target: [],
-        }
+        "user.view": {
+            target: ["group:A.B.*"],
+        },
+        "user.create": {
+            target: ["group:user"],
+        },
     },
     {
-        "A.B.C.D.F": {
-            target: [],
+        ...defaultPermissions,
+        "user.create": {
+            dateStart: new Date(new Date().getTime() + 1000 * 60 * 60 * 24),
+            target: ["group:*"],
         },
-        "A.B.C.E": {
-            target: ["owner:123"],
-        }
     }
 ]
 
-const result = validate(permissions, states, "A.B.C.D.F", {
-    from: "owner",
-    target: "owner:123",
-    owner: "owner:123",
+const result = validate(permissions, states, "user.view", {
+    from: "user:A",
+    target: "user:C",
 });
+
 console.log(result, "->", !!result);

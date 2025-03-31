@@ -1,14 +1,11 @@
-import type { Rule } from "../../types/rule.ts";
+import { rule } from "../../core/rule.ts";
+import { target } from "../../schemas/target/target.ts";
 
-type AllowSelfRequest = {
-    from: string;
-    target: string;
-}
-
-export function allowSelf() : Rule<unknown, AllowSelfRequest> {
-    return {
-        name: "allowSelf",
-        check(_state, request) {
+export function allowSelf() {
+    return rule(
+        "allowSelf",
+        [target()],
+        (_state, request) => {
             if (request.from === request.target) {
                 return true;
             }
@@ -16,5 +13,5 @@ export function allowSelf() : Rule<unknown, AllowSelfRequest> {
             // Not handled by this validation
             return undefined;
         }
-    }
+    );
 }

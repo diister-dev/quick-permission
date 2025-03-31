@@ -1,10 +1,11 @@
-import type { TargetRequest } from "../../schemas/target/target.ts";
-import type { Rule } from "../../types/rule.ts";
+import { rule } from "../../core/rule.ts";
+import { target } from "../../schemas/target/target.ts";
 
-export function denySelf(): Rule<unknown, TargetRequest> {
-    return {
-        name: "denySelf",
-        check(_state, request) {
+export function denySelf() {
+    return rule(
+        "denySelf",
+        [target()],
+        (_state, request) => {
             if (request.from === request.target) {
                 return false;
             }
@@ -12,5 +13,5 @@ export function denySelf(): Rule<unknown, TargetRequest> {
             // Not handled by this validation
             return undefined;
         }
-    }
+    );
 }

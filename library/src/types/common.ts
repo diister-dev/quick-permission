@@ -11,19 +11,38 @@ export type PermissionHierarchy<H extends Hierarchy> = {
 }
 
 export type Hierarchy = {
-    [key: string]: Hierarchy | Permission<Schema<any, any>[], Rule<any, any>[], Hierarchy | undefined> | undefined;
+    [key: string]: Hierarchy | Permission<Schema<any, any>[] | undefined, Rule<any>[] | undefined, Hierarchy | undefined> | undefined;
 }
 
 export type Permission<
-    S extends Schema<any, any>[],
-    R extends Rule<any, any>[],
+    S extends Schema<any, any>[] | undefined,
+    R extends Rule<any>[] | undefined,
     C extends Hierarchy | undefined,
 > = {
     type: 'permission',
-    schemas: S,
+    schemas: PermissionSchemas<S, R>,  // Schemas derived from rules
     rules: R,
     children: C,
 }
+
+export type PermissionSchemas<S, R> = S extends Schema<any, any>[] ?
+    R extends Rule<any>[] ?
+        [...S, ...ExtractSchemasFromRules<R>]
+    : S
+: R extends Rule<any>[] ?
+    ExtractSchemasFromRules<R>
+: never
+
+// Utility type to extract all unique schemas from rules
+export type ExtractSchemasFromRules<R extends Rule<any>[]> = R extends [infer First, ...infer Rest]
+    ? First extends Rule<infer S>
+        ? S extends Schema<any, any>[] 
+            ? Rest extends Rule<any>[]
+                ? [...S, ...ExtractSchemasFromRules<Rest>]
+                : S
+            : []
+        : []
+    : [];
 
 type FlatHierarchy<
     H,
@@ -55,14 +74,16 @@ export type PermissionElement<H, K extends PermissionKey<H>> = H extends Permiss
 : never
 
 export type PermissionStates<H, K extends PermissionKey<H>> = PermissionElement<H, K> extends infer E ?
-    E extends { value: Permission<infer S, any, any> } ?
-       SchemasStates<S>
+    E extends { value: Permission<infer S, infer R, any> } ?
+        SchemasStates<PermissionSchemas<S, R>>
     : never
 : never
 
-export type PermissionRequests<H, K extends PermissionKey<H>> =  PermissionElement<H, K> extends infer E ?
-    E extends { value: Permission<infer S, any, any> } ?
-        SchemasRequests<S>
+export type PermissionRequests<H, K extends PermissionKey<H>> = PermissionElement<H, K> extends infer E ?
+    E extends { value: Permission<infer S, infer R, any> } ?
+        R extends Rule<infer S>[] ?
+            SchemasRequests<PermissionSchemas<S, R>>
+        : never
     : never
 : never
 

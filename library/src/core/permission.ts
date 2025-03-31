@@ -1,25 +1,40 @@
-import type { Hierarchy, Permission, PermissionHierarchy, PermissionKey, PermissionRequests, PermissionStateSet } from "../types/common.ts";
+import type { ExtractSchemasFromRules, Hierarchy, Permission, PermissionHierarchy, PermissionKey, PermissionRequests, PermissionSchemas, PermissionStateSet } from "../types/common.ts";
 import type { Rule } from "../types/rule.ts";
 import type { Schema, SchemasRequests, SchemasStates } from "../types/schema.ts";
 
 export function permission<
-    const S extends Schema<any, any>[],
-    const R extends Rule<
-        SchemasStates<S>,
-        SchemasRequests<S>
-    >[],
-    const C extends Hierarchy,
+    const S extends Schema<any, any>[] | undefined = undefined,
+    const R extends Rule<any>[] | undefined = undefined,
+    const C extends Hierarchy | undefined = undefined,
 >(content: {
     schemas?: S,
     rules?: R,
     children?: C,
-}): Permission<S, R, C> {
+}) {
+    // Extract rules and explicit schemas
+    const rules = (content.rules ?? []) as R;
+    const explicitSchemas = content.schemas ?? [];
+    
+    // Extract schemas from rules
+    const ruleSchemas = rules!.flatMap(rule => rule.schemas || []);
+    
+    // Merge explicit schemas and those extracted from rules, eliminating duplicates
+    const allSchemas = [...explicitSchemas];
+    
+    // Add only schemas that aren't already present (comparing by name)
+    for (const schema of ruleSchemas) {
+        const exists = allSchemas.some(s => s.name === schema.name);
+        if (!exists) {
+            allSchemas.push(schema);
+        }
+    }
+    
     return {
         type: "permission",
-        schemas: (content.schemas ?? []) as S,
-        rules: (content.rules ?? []) as R,
+        schemas: allSchemas as PermissionSchemas<S, R>,
+        rules: rules,
         children: content.children as C,
-    }
+    } as Permission<S, R, C>;
 }
 
 function flatHierarchy(hierarchy: Hierarchy) {
@@ -130,10 +145,11 @@ function allow(schemas: any[], rules: any[], state: any, request: any) {
     return anyExplicitAllow;
 }
 
-function mergeValidations(validations: (boolean | undefined)[]) {
+function mergeValidations(validations: (boolean | undefined)[], mode: "and" | "or" = "and") {
     const merged = validations.reduce((acc, cur) => {
         if (cur === undefined) return acc;
         if (acc === undefined) return cur;
+        if( mode === "or") return acc || cur;
         return acc && cur;
     }, undefined);
 
@@ -169,7 +185,7 @@ export function validate<
     }
 
     console.log({ stateValidations });
-    const result = mergeValidations(stateValidations);
+    const result = mergeValidations(stateValidations, 'or');
 
     return result;
 }

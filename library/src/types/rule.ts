@@ -1,7 +1,9 @@
+import { Schema, SchemasRequests, SchemasStates } from "./schema.ts";
+
 export type Rule<
-    State extends unknown,
-    Request extends unknown
+    S extends Schema<any, any>[] = any
 > = {
     name: string;
-    check: (state: State, request: Request) => boolean | undefined;
+    schemas: S;
+    check: (state: SchemasStates<S>, request: SchemasRequests<S>) => boolean | undefined;
 }

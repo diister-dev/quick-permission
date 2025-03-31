@@ -1,14 +1,11 @@
-import type { Rule } from "../../types/rule.ts";
+import { rule } from "../../core/rule.ts";
+import { owner } from "../../schemas/owner/owner.ts";
 
-type AllowOwnerRequest = {
-    from: string;
-    owner: string;
-}
-
-export function allowOwner() : Rule<unknown, AllowOwnerRequest> {
-    return {
-        name: "allowOwner",
-        check(_state, request) {
+export function allowOwner() {
+    return rule(
+        "allowOwner",
+        [owner()],
+        (_state, request) => {
             if (request.from === request.owner) {
                 return true;
             }
@@ -16,5 +13,5 @@ export function allowOwner() : Rule<unknown, AllowOwnerRequest> {
             // Not handled by this validation
             return undefined;
         }
-    }
+    );
 }
