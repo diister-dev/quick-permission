@@ -94,3 +94,16 @@ export type PermissionKey<P> = P extends PermissionHierarchy<infer H> ?
 export type PermissionStateSet<H> = {
     [K in PermissionKey<H>]?: PermissionStates<H, K>;
 }
+
+export type ValidationError = {
+  type: 'schema' | 'rule';
+  name: string;
+  permissionKey: string;
+  message: string;
+  stateIndex?: number;
+};
+
+export type ValidationResult = {
+  valid: boolean;
+  reasons: ValidationError[];
+};

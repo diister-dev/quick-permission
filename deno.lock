@@ -16,6 +16,8 @@
     }
   },
   "redirects": {
+    "https://deno.land/std/assert/mod.ts": "https://deno.land/std@0.224.0/assert/mod.ts",
+    "https://deno.land/std/fmt/colors.ts": "https://deno.land/std@0.224.0/fmt/colors.ts",
     "https://deno.land/std/testing/asserts.ts": "https://deno.land/std@0.224.0/testing/asserts.ts"
   },
   "remote": {

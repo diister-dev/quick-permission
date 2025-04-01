@@ -1,8 +1,28 @@
 import { rule } from "../core/rule.ts";
+import { ExtractSchemasFromRules } from "../types/common.ts";
 import type { Rule } from "../types/rule.ts";
 import type { Schema } from "../types/schema.ts";
 
-export function and(...rules: Array<Rule<any>>): Rule<any> {
+export function merge<const R extends Rule<any>[]>(rules: R): Rule<ExtractSchemasFromRules<R>> {
+    // Merge schemas from all rules
+    const schemas = mergeSchemas(rules);
+
+    return rule(
+        "merge",
+        schemas,
+        (state, request) => {
+            let valid = undefined;
+            for (const rule of rules) {
+                const result = rule.check(state, request);
+                if (result === false) return false;
+                if (result === true) valid = true;
+            }
+            return valid ? true : undefined;
+        }
+    );
+}
+
+export function and<const R extends Rule<any>[]>(rules: R): Rule<ExtractSchemasFromRules<R>> {
     // Merge schemas from all rules
     const schemas = mergeSchemas(rules);
     
@@ -21,7 +41,7 @@ export function and(...rules: Array<Rule<any>>): Rule<any> {
     );
 }
 
-export function or(...rules: Array<Rule<any>>): Rule<any> {
+export function or<const R extends Rule<any>[]>(rules: R): Rule<ExtractSchemasFromRules<R>> {
     // Merge schemas from all rules
     const schemas = mergeSchemas(rules);
     
@@ -38,7 +58,7 @@ export function or(...rules: Array<Rule<any>>): Rule<any> {
     );
 }
 
-export function not(inputRule: Rule<any>): Rule<any> {
+export function not<const R extends Rule<any>>(inputRule: R) {
     return rule(
         "not",
         inputRule.schemas,
@@ -54,7 +74,7 @@ export function not(inputRule: Rule<any>): Rule<any> {
 /**
  * Merges schemas from multiple rules, avoiding duplications (by name)
  */
-function mergeSchemas(rules: Array<Rule<any>>): Schema<any, any>[] {
+function mergeSchemas<const R extends Rule<any>[]>(rules: R): ExtractSchemasFromRules<R> {
     const schemas: Schema<any, any>[] = [];
     
     // Collect all unique schemas
@@ -68,5 +88,5 @@ function mergeSchemas(rules: Array<Rule<any>>): Schema<any, any>[] {
         }
     }
     
-    return schemas;
+    return schemas as ExtractSchemasFromRules<R>;
 }

@@ -173,7 +173,35 @@ const articlesPermissions = {
    };
    ```
 
-3. **Default Permissions**
+3. **Multiple Permission States**
+   - The system can evaluate permissions against multiple state sources simultaneously
+   - Permission is granted if ANY state source allows the request (OR logic)
+   - This enables permissions to come from different sources (direct grants, role-based, group-based, etc.)
+   ```typescript
+   // Example: States from different sources for the same permission check
+   const states = [
+     {
+       // Permission states from direct user grants
+       'resource.view': { target: ['resource:A', 'resource:B'] }
+     },
+     {
+       // Permission states from user's group membership
+       'resource.view': { target: ['resource:C', 'resource:D'] }
+     },
+     {
+       // Permission states from system-wide roles
+       'resource.view': { target: ['resource:public.*'] }
+     }
+   ];
+   
+   // The permission check will succeed if ANY of these states grants access
+   validate(permissionHierarchy, states, 'resource.view', { 
+     from: 'user:alice', 
+     target: 'resource:B' 
+   }); // returns success
+   ```
+
+4. **Default Permissions**
    - When state is undefined, the `allowed` function can implement default behavior
    - Useful for implementing "owner always has access" patterns
    ```typescript
