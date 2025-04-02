@@ -58,7 +58,7 @@ export function or<const R extends Rule<any>[]>(rules: R): Rule<ExtractSchemasFr
     );
 }
 
-export function not<const R extends Rule<any>>(inputRule: R) {
+export function not<const R extends Rule<any>>(inputRule: R) : Rule<ExtractSchemasFromRules<[R]>> {
     return rule(
         "not",
         inputRule.schemas,

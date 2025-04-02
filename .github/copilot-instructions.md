@@ -14,6 +14,24 @@ This document provides instructions for contributors using GitHub Copilot with t
 - **Schema**: A definition of the structure of state and request data.
 - **States Array**: Multiple permission state sources that are evaluated with OR logic (permission granted if any state allows it).
 
+### Identity and Ownership Rules
+
+- **allowSelf()**: Checks if the entity making the request (`from`) is the same as the target entity (`target`). Used for verifying self-referential permissions (e.g., a user editing their own profile).
+  ```typescript
+  // allowSelf() passes when:
+  request.from === request.target
+  ```
+
+- **allowOwner()**: Checks if the entity making the request (`from`) is the owner of the resource (`owner`). Used for verifying ownership-based permissions (e.g., a user editing a document they own).
+  ```typescript
+  // allowOwner() passes when:
+  request.from === request.owner
+  ```
+
+The main difference:
+- `allowSelf()` checks identity between requester and target
+- `allowOwner()` checks ownership of a resource by the requester
+
 ## Multiple Permission States
 
 The system can evaluate permissions against multiple state sources simultaneously, collected in a states array:
