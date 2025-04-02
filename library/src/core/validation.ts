@@ -165,6 +165,6 @@ export function validate<
     
     return {
         valid: finalResult.valid ?? false,
-        reasons: finalResult.errors
+        reasons: finalResult.valid ? [] : finalResult.errors
     };
 }
