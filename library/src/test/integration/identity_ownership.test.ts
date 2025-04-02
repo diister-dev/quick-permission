@@ -1,6 +1,6 @@
 /**
  * Tests for identity and ownership permission patterns
- * 
+ *
  * These tests demonstrate the distinction between identity and ownership:
  * - allowSelf() checks if request.from === request.target (identity)
  * - allowOwner() checks if request.from === request.owner (ownership)
@@ -9,9 +9,12 @@ import { hierarchy, permission, validate } from "../../core/permission.ts";
 import { allowOwner } from "../../rules/allowOwner/allowOwner.ts";
 import { allowSelf } from "../../rules/allowSelf/allowSelf.ts";
 import { allowTarget } from "../../rules/allowTarget/allowTarget.ts";
-import { and, or, not } from "../../operators/operations.ts";
+import { and, not, or } from "../../operators/operations.ts";
 import { assertEquals } from "jsr:@std/assert";
-import { assertValidationSuccess, assertValidationFailure } from "../helpers/test_utils.ts";
+import {
+  assertValidationFailure,
+  assertValidationSuccess,
+} from "../helpers/test_utils.ts";
 
 Deno.test("Identity and Ownership - User profiles with self-reference and ownership", () => {
   // Arrange - Create a permission hierarchy with identity and ownership rules
@@ -30,7 +33,7 @@ Deno.test("Identity and Ownership - User profiles with self-reference and owners
               // User can only edit their own profile (identity check)
               rules: [allowSelf()],
             }),
-          }
+          },
         }),
         content: permission({
           rules: [allowTarget({ wildcards: true })],
@@ -47,9 +50,9 @@ Deno.test("Identity and Ownership - User profiles with self-reference and owners
               // Only content owner can delete (ownership check)
               rules: [allowOwner()],
             }),
-          }
+          },
         }),
-      }
+      },
     }),
   });
 
@@ -62,7 +65,7 @@ Deno.test("Identity and Ownership - User profiles with self-reference and owners
       "user.content.view": { target: ["content:*"] },
       "user.content.edit": { target: [] },
       "user.content.delete": { target: [] },
-    }
+    },
   ];
 
   // Test - User can view any profile (using allowTarget)
@@ -70,10 +73,10 @@ Deno.test("Identity and Ownership - User profiles with self-reference and owners
     userPermissions,
     states,
     "user.profile.view",
-    { 
-      from: "user:alice", 
-      target: "user:bob"
-    }
+    {
+      from: "user:alice",
+      target: "user:bob",
+    },
   );
   assertValidationSuccess(viewOtherProfileResult);
 
@@ -82,10 +85,10 @@ Deno.test("Identity and Ownership - User profiles with self-reference and owners
     userPermissions,
     states,
     "user.profile.edit",
-    { 
-      from: "user:alice", 
-      target: "user:alice" // Identity check - target is the same as from
-    }
+    {
+      from: "user:alice",
+      target: "user:alice", // Identity check - target is the same as from
+    },
   );
   assertValidationSuccess(editOwnProfileResult);
 
@@ -94,10 +97,10 @@ Deno.test("Identity and Ownership - User profiles with self-reference and owners
     userPermissions,
     states,
     "user.profile.edit",
-    { 
-      from: "user:alice", 
-      target: "user:bob" // Identity check fails - target is not the same as from
-    }
+    {
+      from: "user:alice",
+      target: "user:bob", // Identity check fails - target is not the same as from
+    },
   );
   assertValidationFailure(editOtherProfileResult);
 
@@ -106,11 +109,11 @@ Deno.test("Identity and Ownership - User profiles with self-reference and owners
     userPermissions,
     states,
     "user.content.edit",
-    { 
-      from: "user:alice", 
+    {
+      from: "user:alice",
       target: "content:post-123",
-      owner: "user:alice" // Ownership check - owner is the same as from
-    }
+      owner: "user:alice", // Ownership check - owner is the same as from
+    },
   );
   assertValidationSuccess(editOwnContentResult);
 
@@ -119,11 +122,11 @@ Deno.test("Identity and Ownership - User profiles with self-reference and owners
     userPermissions,
     states,
     "user.content.edit",
-    { 
-      from: "user:alice", 
+    {
+      from: "user:alice",
       target: "content:post-456",
-      owner: "user:bob" // Ownership check fails - owner is not the same as from
-    }
+      owner: "user:bob", // Ownership check fails - owner is not the same as from
+    },
   );
   assertValidationFailure(editOthersContentResult);
 
@@ -132,13 +135,13 @@ Deno.test("Identity and Ownership - User profiles with self-reference and owners
     userPermissions,
     states,
     "user.content.delete",
-    { 
-      from: "user:alice", 
+    {
+      from: "user:alice",
       target: "content:post-123",
-      owner: "user:alice" // Ownership check - owner is the same as from
-    }
+      owner: "user:alice", // Ownership check - owner is the same as from
+    },
   );
-  
+
   assertValidationSuccess(deleteOwnContentResult);
 });
 
@@ -174,7 +177,7 @@ Deno.test("Identity and Ownership - Issue tracker with combined patterns", () =>
           // allowOwner() checks if from === owner (user is the issue creator/owner)
           rules: [and([not(allowOwner()), allowTarget({ wildcards: true })])],
         }),
-      }
+      },
     }),
   });
 
@@ -187,16 +190,16 @@ Deno.test("Identity and Ownership - Issue tracker with combined patterns", () =>
       "issue.comment": { target: ["project:A/*"] },
       "issue.assign": { target: ["project:A/issue-*"] },
       "issue.resolve": { target: ["project:A/issue-*"] },
-      "issue.delete": { target: [] }
+      "issue.delete": { target: [] },
     },
     {
       // Additional permissions for project managers
-      "issue.reopen": { target: ["project:*"] }
+      "issue.reopen": { target: ["project:*"] },
     },
     {
       // Administrative permissions
-      "issue.delete": { target: ["project:*"] }
-    }
+      "issue.delete": { target: ["project:*"] },
+    },
   ];
 
   // Test user viewing an issue
@@ -204,10 +207,10 @@ Deno.test("Identity and Ownership - Issue tracker with combined patterns", () =>
     issuePermissions,
     states,
     "issue.view",
-    { 
-      from: "user:developer", 
-      target: "project:A/issue-123" 
-    }
+    {
+      from: "user:developer",
+      target: "project:A/issue-123",
+    },
   );
   assertValidationSuccess(viewIssueResult);
 
@@ -217,10 +220,10 @@ Deno.test("Identity and Ownership - Issue tracker with combined patterns", () =>
     issuePermissions,
     states,
     "issue.assign",
-    { 
-      from: "user:developer", 
-      target: "user:developer" // Self-reference - allowSelf() checks if from === target
-    }
+    {
+      from: "user:developer",
+      target: "user:developer", // Self-reference - allowSelf() checks if from === target
+    },
   );
   assertValidationSuccess(assignToSelfResult);
 
@@ -229,10 +232,10 @@ Deno.test("Identity and Ownership - Issue tracker with combined patterns", () =>
     issuePermissions,
     states,
     "issue.assign",
-    { 
-      from: "user:developer", 
-      target: "project:A/issue-456" 
-    }
+    {
+      from: "user:developer",
+      target: "project:A/issue-456",
+    },
   );
   assertValidationSuccess(assignToOtherResult);
 
@@ -242,10 +245,10 @@ Deno.test("Identity and Ownership - Issue tracker with combined patterns", () =>
     issuePermissions,
     states,
     "issue.resolve",
-    { 
-      from: "user:pm", 
-      target: "user:pm" // Self-assigned issue - allowSelf() checks if from === target
-    }
+    {
+      from: "user:pm",
+      target: "user:pm", // Self-assigned issue - allowSelf() checks if from === target
+    },
   );
   assertValidationSuccess(resolveSelfAssignedResult);
 
@@ -254,10 +257,10 @@ Deno.test("Identity and Ownership - Issue tracker with combined patterns", () =>
     issuePermissions,
     states,
     "issue.reopen",
-    { 
-      from: "user:pm", 
-      target: "user:pm" // Self-assigned issue - not(allowSelf()) prevents reopening own assignments
-    }
+    {
+      from: "user:pm",
+      target: "user:pm", // Self-assigned issue - not(allowSelf()) prevents reopening own assignments
+    },
   );
   assertValidationFailure(reopenSelfAssignedResult);
 
@@ -266,10 +269,10 @@ Deno.test("Identity and Ownership - Issue tracker with combined patterns", () =>
     issuePermissions,
     states,
     "issue.reopen",
-    { 
-      from: "user:pm", 
-      target: "project:A/issue-123" 
-    }
+    {
+      from: "user:pm",
+      target: "project:A/issue-123",
+    },
   );
   assertValidationSuccess(reopenOtherResult);
 
@@ -279,11 +282,11 @@ Deno.test("Identity and Ownership - Issue tracker with combined patterns", () =>
     issuePermissions,
     states,
     "issue.delete",
-    { 
-      from: "user:admin", 
+    {
+      from: "user:admin",
       target: "project:A/issue-456",
-      owner: "user:admin" // Issue owned by admin - not(allowOwner()) prevents deleting own issues
-    }
+      owner: "user:admin", // Issue owned by admin - not(allowOwner()) prevents deleting own issues
+    },
   );
   assertValidationFailure(deleteOwnIssueResult);
 
@@ -292,11 +295,11 @@ Deno.test("Identity and Ownership - Issue tracker with combined patterns", () =>
     issuePermissions,
     states,
     "issue.delete",
-    { 
-      from: "user:admin", 
+    {
+      from: "user:admin",
       target: "project:A/issue-123",
-      owner: "user:developer" // Issue owned by developer - allowOwner() checks if from === owner
-    }
+      owner: "user:developer", // Issue owned by developer - allowOwner() checks if from === owner
+    },
   );
   assertValidationSuccess(deleteOthersIssueResult);
 });

@@ -14,6 +14,41 @@ This document provides instructions for contributors using GitHub Copilot with t
 - **Schema**: A definition of the structure of state and request data.
 - **States Array**: Multiple permission state sources that are evaluated with OR logic (permission granted if any state allows it).
 
+### Hierarchical Resolution of Missing States
+
+When validating permissions, the system exhibits an important behavior when states are missing:
+
+- If a specific permission key has no state defined in any state source, the system will "fall back" to checking parent permissions in the hierarchy.
+- This means that permissions defined at higher levels may apply to child permissions if the child has no explicit state.
+- This behavior can lead to unexpected results if not properly understood or documented.
+
+For example:
+```typescript
+const hierarchy = {
+  "user": {
+    // Has allowTarget rule
+    "content": {
+      // Also has allowTarget rule
+      "edit": {
+        // Has allowOwner rule
+      }
+    }
+  }
+};
+
+// State with missing user.content.edit
+const state = {
+  "user.content": { target: ["user:*"] }
+  // Notice user.content.edit is not defined
+};
+
+// This will check user.content.edit first (not found),
+// then fall back to user.content which only has allowTarget,
+// potentially bypassing the allowOwner check
+```
+
+To ensure explicit permissions checks, always define states for all permission keys that will be validated.
+
 ### Identity and Ownership Rules
 
 - **allowSelf()**: Checks if the entity making the request (`from`) is the same as the target entity (`target`). Used for verifying self-referential permissions (e.g., a user editing their own profile).
@@ -119,25 +154,33 @@ export function myRule(options?: MyRuleOptions): Rule<[Schema1, Schema2]> {
 }
 ```
 
-## Error Feedback Improvements
+## Best Practices for Testing Permissions
 
-When reporting errors, provide as much context as possible:
+### Explicit Permission States
 
-1. Which permission failed
-2. Which rule or schema caused the failure
-3. Clear explanation of why it failed
-4. Any relevant state or context information
-
-## Debugging Validation
-
-Use the `printValidationResults` helper function to understand validation failures:
+When writing tests, always define explicit states for all permission keys that will be validated:
 
 ```typescript
-const result = validate(permissions, states, "permission.key", request);
-printValidationResults(result);
+// GOOD: Define all permission states explicitly
+const states = [
+  {
+    "user.view": { target: ["user:*"] },
+    "user.edit": { target: [] }, // Even if empty, define it explicitly
+    "user.delete": { target: ["user:*"] },
+  }
+];
+
+// BAD: Missing states might cause validation to use parent rules
+const incompleteStates = [
+  {
+    "user.view": { target: ["user:*"] },
+    // Missing user.edit might cause validation to check parent rules
+    "user.delete": { target: ["user:*"] },
+  }
+];
 ```
 
-## Test Structure Guidelines
+### Multiple States Sources
 
 When writing tests that use multiple permission states:
 
@@ -157,6 +200,24 @@ const states = [
 // INCORRECT - don't structure tests like this (misrepresenting states as different roles)
 const adminStates = { "user.view": { target: ["user:*"] } };
 const regularUserStates = { "user.view": { target: ["user:self"] } };
+```
+
+## Error Feedback Improvements
+
+When reporting errors, provide as much context as possible:
+
+1. Which permission failed
+2. Which rule or schema caused the failure
+3. Clear explanation of why it failed
+4. Any relevant state or context information
+
+## Debugging Validation
+
+Use the `printValidationResults` helper function to understand validation failures:
+
+```typescript
+const result = validate(permissions, states, "permission.key", request);
+printValidationResults(result);
 ```
 
 ## Improvements and Suggestions

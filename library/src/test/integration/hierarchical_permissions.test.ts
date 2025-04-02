@@ -1,6 +1,6 @@
 /**
  * Tests for hierarchical permission structures
- * 
+ *
  * These tests demonstrate scenarios with multi-level permission hierarchies:
  * - Permission inheritance across multiple levels
  * - Nested permission structures
@@ -9,7 +9,10 @@
 import { hierarchy, permission, validate } from "../../core/permission.ts";
 import { allowTarget } from "../../rules/allowTarget/allowTarget.ts";
 import { assertEquals } from "jsr:@std/assert";
-import { assertValidationSuccess, assertValidationFailure } from "../helpers/test_utils.ts";
+import {
+  assertValidationFailure,
+  assertValidationSuccess,
+} from "../helpers/test_utils.ts";
 
 Deno.test("Hierarchical Permissions - Multi-level hierarchy with permission inheritance", () => {
   // Arrange - Create a multi-level permission hierarchy
@@ -29,7 +32,7 @@ Deno.test("Hierarchical Permissions - Multi-level hierarchy with permission inhe
             share: permission({
               rules: [allowTarget({ wildcards: true })],
             }),
-          }
+          },
         }),
         folder: permission({
           rules: [allowTarget({ wildcards: true })],
@@ -43,9 +46,9 @@ Deno.test("Hierarchical Permissions - Multi-level hierarchy with permission inhe
             remove: permission({
               rules: [allowTarget({ wildcards: true })],
             }),
-          }
+          },
         }),
-      }
+      },
     }),
   });
 
@@ -54,7 +57,7 @@ Deno.test("Hierarchical Permissions - Multi-level hierarchy with permission inhe
     {
       // Minimum permissions needed for folder view only
       "content.folder.view": { target: ["folder:project-A/*"] },
-    }
+    },
   ];
 
   // Create a permission source with document edit access
@@ -66,7 +69,7 @@ Deno.test("Hierarchical Permissions - Multi-level hierarchy with permission inhe
     {
       // Second source: document edit access
       "content.document.edit": { target: ["document:project-A/report.md"] },
-    }
+    },
   ];
 
   // Test folder viewing with just the first permission source
@@ -74,7 +77,7 @@ Deno.test("Hierarchical Permissions - Multi-level hierarchy with permission inhe
     contentPermissions,
     folderViewOnlyStates,
     "content.folder.view",
-    { from: "user:bob", target: "folder:project-A/docs" }
+    { from: "user:bob", target: "folder:project-A/docs" },
   );
   assertValidationSuccess(viewFolderResult);
 
@@ -83,7 +86,7 @@ Deno.test("Hierarchical Permissions - Multi-level hierarchy with permission inhe
     contentPermissions,
     folderViewOnlyStates,
     "content.folder.add",
-    { from: "user:bob", target: "folder:project-A/docs" }
+    { from: "user:bob", target: "folder:project-A/docs" },
   );
   assertValidationFailure(addToFolderResult);
 
@@ -92,7 +95,7 @@ Deno.test("Hierarchical Permissions - Multi-level hierarchy with permission inhe
     contentPermissions,
     documentEditStates,
     "content.document.edit",
-    { from: "user:bob", target: "document:project-A/report.md" }
+    { from: "user:bob", target: "document:project-A/report.md" },
   );
   assertValidationSuccess(editDocumentResult);
 
@@ -101,7 +104,7 @@ Deno.test("Hierarchical Permissions - Multi-level hierarchy with permission inhe
     contentPermissions,
     documentEditStates,
     "content.document.edit",
-    { from: "user:bob", target: "document:project-A/other.md" }
+    { from: "user:bob", target: "document:project-A/other.md" },
   );
   assertValidationFailure(editOtherDocumentResult);
 
@@ -110,7 +113,7 @@ Deno.test("Hierarchical Permissions - Multi-level hierarchy with permission inhe
     contentPermissions,
     documentEditStates,
     "content.folder.view",
-    { from: "user:bob", target: "folder:project-B/docs" }
+    { from: "user:bob", target: "folder:project-B/docs" },
   );
   assertValidationFailure(viewOtherFolderResult);
 });
@@ -139,19 +142,19 @@ Deno.test("Hierarchical Permissions - Deep nesting with parent-child relationshi
                     manage: permission({
                       rules: [allowTarget({ wildcards: true })],
                     }),
-                  }
+                  },
                 }),
-              }
+              },
             }),
             manage: permission({
               rules: [allowTarget({ wildcards: true })],
             }),
-          }
+          },
         }),
         admin: permission({
           rules: [allowTarget({ wildcards: true })],
         }),
-      }
+      },
     }),
   });
 
@@ -164,13 +167,15 @@ Deno.test("Hierarchical Permissions - Deep nesting with parent-child relationshi
       "org.department.team": { target: ["team:backend"] },
       "org.department.team.project": { target: ["project:api"] },
       "org.department.team.project.view": { target: ["project:api/*"] },
-      "org.department.team.project.edit": { target: ["project:api/services/*"] },
+      "org.department.team.project.edit": {
+        target: ["project:api/services/*"],
+      },
     },
     {
       // Team lead permissions with management access
       "org.department.team.manage": { target: ["team:backend"] },
       "org.department.team.project.manage": { target: ["project:api"] },
-    }
+    },
   ];
 
   // Test - Can view projects in the hierarchy
@@ -178,7 +183,7 @@ Deno.test("Hierarchical Permissions - Deep nesting with parent-child relationshi
     organizationPermissions,
     states,
     "org.department.team.project.view",
-    { from: "user:dev1", target: "project:api/models" }
+    { from: "user:dev1", target: "project:api/models" },
   );
   assertValidationSuccess(viewProjectResult);
 
@@ -187,7 +192,7 @@ Deno.test("Hierarchical Permissions - Deep nesting with parent-child relationshi
     organizationPermissions,
     states,
     "org.department.team.project.edit",
-    { from: "user:dev1", target: "project:api/services/userAuth" }
+    { from: "user:dev1", target: "project:api/services/userAuth" },
   );
   assertValidationSuccess(editServiceResult);
 
@@ -196,7 +201,7 @@ Deno.test("Hierarchical Permissions - Deep nesting with parent-child relationshi
     organizationPermissions,
     states,
     "org.department.team.project.edit",
-    { from: "user:dev1", target: "project:api/models/user" }
+    { from: "user:dev1", target: "project:api/models/user" },
   );
   assertValidationFailure(editModelsResult);
 
@@ -205,7 +210,7 @@ Deno.test("Hierarchical Permissions - Deep nesting with parent-child relationshi
     organizationPermissions,
     states,
     "org.department.team",
-    { from: "user:lead1", target: "team:backend" }
+    { from: "user:lead1", target: "team:backend" },
   );
   assertValidationSuccess(manageTeamResult);
 
@@ -214,7 +219,7 @@ Deno.test("Hierarchical Permissions - Deep nesting with parent-child relationshi
     organizationPermissions,
     states,
     "org.department",
-    { from: "user:dev1", target: "department:marketing" }
+    { from: "user:dev1", target: "department:marketing" },
   );
   assertValidationFailure(otherDepartmentResult);
 });

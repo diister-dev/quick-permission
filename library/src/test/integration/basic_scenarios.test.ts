@@ -9,7 +9,10 @@ import { denySelf } from "../../rules/denySelf/denySelf.ts";
 import { ensureTime } from "../../rules/ensureTime/ensureTime.ts";
 import { and, not, or } from "../../operators/operations.ts";
 import { assertEquals } from "jsr:@std/assert";
-import { assertValidationSuccess, assertValidationFailure } from "../helpers/test_utils.ts";
+import {
+  assertValidationFailure,
+  assertValidationSuccess,
+} from "../helpers/test_utils.ts";
 
 Deno.test("Integration - user management basic scenario", () => {
   // Arrange - Create a permission hierarchy for user management
@@ -26,7 +29,7 @@ Deno.test("Integration - user management basic scenario", () => {
         delete: permission({
           rules: [denySelf(), allowTarget()],
         }),
-      }
+      },
     }),
   });
 
@@ -38,7 +41,7 @@ Deno.test("Integration - user management basic scenario", () => {
       "user.view": { target: ["user:*"] },
       "user.update": { target: ["user:*"] },
       "user.delete": { target: ["user:*"] },
-    }
+    },
   ];
 
   // Act & Assert - Admin can view any user
@@ -46,7 +49,7 @@ Deno.test("Integration - user management basic scenario", () => {
     userPermissions,
     states,
     "user.view",
-    { from: "user:admin", target: "user:regular" }
+    { from: "user:admin", target: "user:regular" },
   );
   assertValidationSuccess(viewAnyResult);
 
@@ -55,7 +58,7 @@ Deno.test("Integration - user management basic scenario", () => {
     userPermissions,
     states,
     "user.delete",
-    { from: "user:admin", target: "user:regular" }
+    { from: "user:admin", target: "user:regular" },
   );
   assertValidationSuccess(deleteUserResult);
 
@@ -64,16 +67,16 @@ Deno.test("Integration - user management basic scenario", () => {
     userPermissions,
     states,
     "user.delete",
-    { from: "user:admin", target: "user:admin" }
+    { from: "user:admin", target: "user:admin" },
   );
   assertValidationFailure(deleteSelfResult, ["rule"], ["denySelf"]);
-  
+
   // Act & Assert - User can view other users (allowTarget rule grants this)
   const regularViewsResult = validate(
     userPermissions,
     states,
     "user.view",
-    { from: "user:regular", target: "user:another" }
+    { from: "user:regular", target: "user:another" },
   );
   assertValidationSuccess(regularViewsResult);
 
@@ -82,17 +85,17 @@ Deno.test("Integration - user management basic scenario", () => {
     userPermissions,
     states,
     "user.update",
-    { from: "user:regular", target: "user:regular" }
+    { from: "user:regular", target: "user:regular" },
   );
   assertValidationSuccess(regularUpdatesSelfResult);
-  
+
   // Test with different permission state (limited permissions)
   const limitedStates = [
     {
       // A permission source with limited permissions
       "user.view": { target: ["user:*"] },
       // No update or delete permissions
-    }
+    },
   ];
 
   // Act & Assert - User cannot update others (no explicit permission)
@@ -100,7 +103,7 @@ Deno.test("Integration - user management basic scenario", () => {
     userPermissions,
     limitedStates,
     "user.update",
-    { from: "user:regular", target: "user:another" }
+    { from: "user:regular", target: "user:another" },
   );
   assertValidationFailure(regularUpdatesResult);
 });
@@ -110,10 +113,10 @@ Deno.test("Integration - time-based resource access", () => {
   const now = new Date();
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
-  
+
   const tomorrow = new Date(now);
   tomorrow.setDate(now.getDate() + 1);
-  
+
   const nextWeek = new Date(now);
   nextWeek.setDate(now.getDate() + 7);
 
@@ -127,8 +130,8 @@ Deno.test("Integration - time-based resource access", () => {
         }),
         write: permission({
           rules: [allowTarget({ wildcards: true }), allowOwner()],
-        })
-      }
+        }),
+      },
     }),
   });
 
@@ -136,12 +139,12 @@ Deno.test("Integration - time-based resource access", () => {
   const readProjectANowStates = [
     {
       // Permission source: Project A current access period
-      "resource": { 
+      "resource": {
         dateStart: yesterday,
-        dateEnd: tomorrow
+        dateEnd: tomorrow,
       },
-      "resource.read": { target: ["project:A.*"] }
-    }
+      "resource.read": { target: ["project:A.*"] },
+    },
   ];
 
   // Act & Assert - Can read project A now (within valid time period)
@@ -149,11 +152,11 @@ Deno.test("Integration - time-based resource access", () => {
     resourcePermissions,
     readProjectANowStates,
     "resource.read",
-    { 
-      from: "user:bob", 
+    {
+      from: "user:bob",
       target: "project:A.docs",
-      date: now
-    }
+      date: now,
+    },
   );
   assertValidationSuccess(readProjectAResult);
 
@@ -161,12 +164,12 @@ Deno.test("Integration - time-based resource access", () => {
   const readProjectBNowStates = [
     {
       // Permission source: Project B future access period
-      "resource": { 
+      "resource": {
         dateStart: tomorrow,
-        dateEnd: nextWeek
+        dateEnd: nextWeek,
       },
-      "resource.read": { target: ["project:B.*"] }
-    }
+      "resource.read": { target: ["project:B.*"] },
+    },
   ];
 
   // Act & Assert - Cannot read project B yet (time constraint fails)
@@ -174,11 +177,11 @@ Deno.test("Integration - time-based resource access", () => {
     resourcePermissions,
     readProjectBNowStates,
     "resource.read",
-    { 
-      from: "user:bob", 
+    {
+      from: "user:bob",
       target: "project:B.docs",
-      date: now
-    }
+      date: now,
+    },
   );
   assertValidationFailure(readProjectBResult, ["rule"], ["ensureTime"]);
 
@@ -188,11 +191,11 @@ Deno.test("Integration - time-based resource access", () => {
     resourcePermissions,
     readProjectBNowStates,
     "resource.read",
-    { 
-      from: "user:bob", 
+    {
+      from: "user:bob",
       target: "project:B.docs",
-      date: tomorrow
-    }
+      date: tomorrow,
+    },
   );
   assertValidationSuccess(readProjectBTomorrowResult);
 
@@ -201,11 +204,11 @@ Deno.test("Integration - time-based resource access", () => {
     resourcePermissions,
     readProjectANowStates,
     "resource.read",
-    { 
-      from: "user:bob", 
+    {
+      from: "user:bob",
       target: "project:A.docs",
-      date: nextWeek
-    }
+      date: nextWeek,
+    },
   );
   assertValidationFailure(readProjectANextWeekResult, ["rule"], ["ensureTime"]);
 
@@ -214,20 +217,20 @@ Deno.test("Integration - time-based resource access", () => {
   const multipleSourcesStates = [
     {
       // Permission source 1: Current access period but for project C (not A or B)
-      "resource": { 
+      "resource": {
         dateStart: yesterday,
-        dateEnd: tomorrow
+        dateEnd: tomorrow,
       },
-      "resource.read": { target: ["project:C.*"] }  // This won't match our request
+      "resource.read": { target: ["project:C.*"] }, // This won't match our request
     },
     {
       // Permission source 2: Project B with future access period
-      "resource": { 
+      "resource": {
         dateStart: tomorrow,
-        dateEnd: nextWeek
+        dateEnd: nextWeek,
       },
-      "resource.read": { target: ["project:B.*"] }  // This matches our request
-    }
+      "resource.read": { target: ["project:B.*"] }, // This matches our request
+    },
   ];
 
   // Act & Assert - Tomorrow access should work via source 2
@@ -235,11 +238,11 @@ Deno.test("Integration - time-based resource access", () => {
     resourcePermissions,
     multipleSourcesStates,
     "resource.read",
-    { 
-      from: "user:bob", 
+    {
+      from: "user:bob",
       target: "project:B.docs",
-      date: tomorrow  // Tomorrow is within period for source 2
-    }
+      date: tomorrow, // Tomorrow is within period for source 2
+    },
   );
   assertValidationSuccess(readProjectBTomorrowMultiSourceResult);
 
@@ -248,13 +251,15 @@ Deno.test("Integration - time-based resource access", () => {
     resourcePermissions,
     multipleSourcesStates,
     "resource.read",
-    { 
-      from: "user:bob", 
+    {
+      from: "user:bob",
       target: "project:B.docs",
-      date: now  // Today is outside period for source 2
-    }
+      date: now, // Today is outside period for source 2
+    },
   );
-  assertValidationFailure(readProjectBNowMultiSourceResult, ["rule"], ["ensureTime"]);
+  assertValidationFailure(readProjectBNowMultiSourceResult, ["rule"], [
+    "ensureTime",
+  ]);
 });
 
 Deno.test("Integration - complex rule combinations", () => {
@@ -266,8 +271,8 @@ Deno.test("Integration - complex rule combinations", () => {
         delete: permission({
           // Une règle simple : allowTarget
           rules: [allowTarget({ wildcards: true })],
-        })
-      }
+        }),
+      },
     }),
   });
 
@@ -275,7 +280,7 @@ Deno.test("Integration - complex rule combinations", () => {
   const adminDeleteState = [
     {
       "content.delete": { target: ["content:*"] },
-    }
+    },
   ];
 
   // Act & Assert - Admin peut supprimer le contenu avec une règle simple
@@ -283,10 +288,10 @@ Deno.test("Integration - complex rule combinations", () => {
     simpleTargetPermissions,
     adminDeleteState,
     "content.delete",
-    { 
-      from: "user:admin", 
-      target: "content:article3"
-    }
+    {
+      from: "user:admin",
+      target: "content:article3",
+    },
   );
   assertValidationSuccess(adminDeletesSimpleResult);
 
@@ -297,8 +302,8 @@ Deno.test("Integration - complex rule combinations", () => {
       children: {
         delete: permission({
           rules: [denySelf()],
-        })
-      }
+        }),
+      },
     }),
   });
 
@@ -307,20 +312,20 @@ Deno.test("Integration - complex rule combinations", () => {
     selfProtectedPermissions,
     adminDeleteState,
     "content.delete",
-    { 
-      from: "user:admin", 
-      target: "user:admin"  // Cible correspond à from, déclenchant denySelf
-    }
+    {
+      from: "user:admin",
+      target: "user:admin", // Cible correspond à from, déclenchant denySelf
+    },
   );
   assertValidationFailure(adminDeletesSelfResult, ["rule"], ["denySelf"]);
-  
+
   // Test pour combiner ensureTime avec une règle qui retourne true explicitement
   const workStart = new Date();
   workStart.setHours(9, 0, 0, 0);
-  
+
   const workEnd = new Date();
   workEnd.setHours(17, 0, 0, 0);
-  
+
   const combinedTimePermissions = hierarchy({
     content: permission({
       rules: [],
@@ -329,36 +334,36 @@ Deno.test("Integration - complex rule combinations", () => {
           // Combinaison de ensureTime avec allowTarget pour avoir un true explicite
           rules: [
             ensureTime(),
-            allowTarget({ wildcards: true })
+            allowTarget({ wildcards: true }),
           ],
-        })
-      }
+        }),
+      },
     }),
   });
-  
+
   const workHoursEditState = [
     {
-      "content.edit": { 
+      "content.edit": {
         dateStart: workStart,
         dateEnd: workEnd,
-        target: ["content:*"]  // Pour allowTarget
+        target: ["content:*"], // Pour allowTarget
       },
-    }
+    },
   ];
-  
+
   // Act & Assert - On peut éditer pendant les heures de travail
   const duringWorkHours = new Date();
   duringWorkHours.setHours(12, 0, 0, 0); // Midi
-  
+
   const editDuringWorkHoursResult = validate(
     combinedTimePermissions,
     workHoursEditState,
     "content.edit",
-    { 
+    {
       from: "user:alice",
       target: "content:article2",
-      date: duringWorkHours
-    }
+      date: duringWorkHours,
+    },
   );
   assertValidationSuccess(editDuringWorkHoursResult);
 });

@@ -1,6 +1,6 @@
 /**
  * Tests for permission system with multiple sources
- * 
+ *
  * These tests demonstrate scenarios with multiple permission sources:
  * - Multiple permission states evaluated with OR logic
  * - Permissions coming from different sources (direct grants, roles, groups)
@@ -9,7 +9,10 @@
 import { hierarchy, permission, validate } from "../../core/permission.ts";
 import { allowTarget } from "../../rules/allowTarget/allowTarget.ts";
 import { assertEquals } from "jsr:@std/assert";
-import { assertValidationSuccess, assertValidationFailure } from "../helpers/test_utils.ts";
+import {
+  assertValidationFailure,
+  assertValidationSuccess,
+} from "../helpers/test_utils.ts";
 
 Deno.test("Multiple Sources - Permission grants from different sources with OR logic", () => {
   // Arrange - Create a permission hierarchy for resources
@@ -26,7 +29,7 @@ Deno.test("Multiple Sources - Permission grants from different sources with OR l
         delete: permission({
           rules: [allowTarget({ wildcards: true })],
         }),
-      }
+      },
     }),
   });
 
@@ -48,7 +51,7 @@ Deno.test("Multiple Sources - Permission grants from different sources with OR l
       "resource": { target: ["resource:document.C", "resource:*.public"] },
       "resource.view": { target: ["resource:document.C", "resource:*.public"] },
       "resource.delete": { target: ["resource:document.C"] },
-    }
+    },
   ];
 
   // Test access to document A (granted via Source 1)
@@ -56,7 +59,7 @@ Deno.test("Multiple Sources - Permission grants from different sources with OR l
     resourcePermissions,
     states,
     "resource.view",
-    { from: "user:alice", target: "resource:document.A" }
+    { from: "user:alice", target: "resource:document.A" },
   );
   assertValidationSuccess(viewDocumentAResult);
 
@@ -65,7 +68,7 @@ Deno.test("Multiple Sources - Permission grants from different sources with OR l
     resourcePermissions,
     states,
     "resource.view",
-    { from: "user:alice", target: "resource:document.B" }
+    { from: "user:alice", target: "resource:document.B" },
   );
   assertValidationSuccess(viewDocumentBResult);
 
@@ -74,7 +77,7 @@ Deno.test("Multiple Sources - Permission grants from different sources with OR l
     resourcePermissions,
     states,
     "resource.view",
-    { from: "user:alice", target: "resource:document.C" }
+    { from: "user:alice", target: "resource:document.C" },
   );
   assertValidationSuccess(viewDocumentCResult);
 
@@ -83,7 +86,7 @@ Deno.test("Multiple Sources - Permission grants from different sources with OR l
     resourcePermissions,
     states,
     "resource.view",
-    { from: "user:alice", target: "resource:document.D" }
+    { from: "user:alice", target: "resource:document.D" },
   );
   assertValidationFailure(viewDocumentDResult);
 
@@ -92,7 +95,7 @@ Deno.test("Multiple Sources - Permission grants from different sources with OR l
     resourcePermissions,
     states,
     "resource.edit",
-    { from: "user:alice", target: "resource:report.monthly" }
+    { from: "user:alice", target: "resource:report.monthly" },
   );
   assertValidationSuccess(editMonthlyReportResult);
 
@@ -101,7 +104,7 @@ Deno.test("Multiple Sources - Permission grants from different sources with OR l
     resourcePermissions,
     states,
     "resource.delete",
-    { from: "user:alice", target: "resource:document.C" }
+    { from: "user:alice", target: "resource:document.C" },
   );
   assertValidationSuccess(deleteDocumentCResult);
 
@@ -110,7 +113,7 @@ Deno.test("Multiple Sources - Permission grants from different sources with OR l
     resourcePermissions,
     states,
     "resource.view",
-    { from: "user:alice", target: "resource:document.public" }
+    { from: "user:alice", target: "resource:document.public" },
   );
   assertValidationSuccess(viewPublicDocumentResult);
 });
@@ -130,9 +133,9 @@ Deno.test("Multiple Sources - Combining permissions from multiple user contexts"
             configure: permission({
               rules: [allowTarget({ wildcards: true })],
             }),
-          }
+          },
         }),
-      }
+      },
     }),
   });
 
@@ -153,7 +156,7 @@ Deno.test("Multiple Sources - Combining permissions from multiple user contexts"
     {
       // Source 3: Special temporary grants
       "app.feature.configure": { target: ["feature:standard/notifications"] },
-    }
+    },
   ];
 
   // Test - Can use standard features (from personal permissions)
@@ -161,7 +164,7 @@ Deno.test("Multiple Sources - Combining permissions from multiple user contexts"
     applicationPermissions,
     states,
     "app.feature.use",
-    { from: "user:alice", target: "feature:standard/dashboard" }
+    { from: "user:alice", target: "feature:standard/dashboard" },
   );
   assertValidationSuccess(useStandardResult);
 
@@ -170,7 +173,7 @@ Deno.test("Multiple Sources - Combining permissions from multiple user contexts"
     applicationPermissions,
     states,
     "app.feature.use",
-    { from: "user:alice", target: "feature:premium/analytics" }
+    { from: "user:alice", target: "feature:premium/analytics" },
   );
   assertValidationSuccess(usePremiumResult);
 
@@ -179,7 +182,7 @@ Deno.test("Multiple Sources - Combining permissions from multiple user contexts"
     applicationPermissions,
     states,
     "app.feature.configure",
-    { from: "user:alice", target: "feature:standard/notifications" }
+    { from: "user:alice", target: "feature:standard/notifications" },
   );
   assertValidationSuccess(configureNotificationsResult);
 
@@ -188,7 +191,7 @@ Deno.test("Multiple Sources - Combining permissions from multiple user contexts"
     applicationPermissions,
     states,
     "app.feature.configure",
-    { from: "user:alice", target: "feature:premium/analytics" }
+    { from: "user:alice", target: "feature:premium/analytics" },
   );
   assertValidationFailure(configureAnalyticsResult);
 });
