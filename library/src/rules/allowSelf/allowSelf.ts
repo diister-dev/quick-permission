@@ -1,7 +1,8 @@
 import { rule } from "../../core/rule.ts";
 import { target } from "../../schemas/target/target.ts";
+import type { Rule } from "../../types/rule.ts";
 
-export function allowSelf() {
+export function allowSelf(): Rule<[ReturnType<typeof target>]> {
   return rule(
     "allowSelf",
     [target()],

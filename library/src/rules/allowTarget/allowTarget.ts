@@ -1,5 +1,6 @@
 import { rule } from "../../core/rule.ts";
 import { target } from "../../schemas/target/target.ts";
+import type { Rule } from "../../types/rule.ts";
 
 export interface AllowTargetOptions {
   /**
@@ -15,7 +16,9 @@ export interface AllowTargetOptions {
   wildcardChar?: string;
 }
 
-export function allowTarget(options: AllowTargetOptions = {}) {
+export function allowTarget(
+  options: AllowTargetOptions = {},
+): Rule<[ReturnType<typeof target>]> {
   const wildcards = options.wildcards ?? false;
   const wildcardChar = options.wildcardChar ?? "*";
 

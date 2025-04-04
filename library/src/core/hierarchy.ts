@@ -112,7 +112,7 @@ export function satisfiedBy<
 >(
   hierarchy: H,
   key: K,
-) {
+): PermissionKey<H>[] {
   const matching: PermissionKey<H>[] = [];
   let traverseKey = key;
   let seperatorIndex = traverseKey.lastIndexOf(".");
