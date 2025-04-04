@@ -11,7 +11,7 @@ Deno.test("allowTarget - should return true when target is in the allowed list",
   const request = { target: "user:123" };
 
   // Act
-  const result = rule.check(state, request);
+  const result = rule.check(state, request as any); // Cast to any to bypass TypeScript error
 
   // Assert
   assertEquals(result, true);
@@ -24,7 +24,7 @@ Deno.test("allowTarget - should return undefined when target is not in the allow
   const request = { target: "user:123" };
 
   // Act
-  const result = rule.check(state, request);
+  const result = rule.check(state, request as any); // Cast to any to bypass TypeScript error
 
   // Assert
   assertEquals(result, undefined);
@@ -36,25 +36,28 @@ Deno.test("allowTarget - should handle missing or invalid state/target properly"
 
   // Act & Assert - Undefined state should throw TypeError
   assertThrows(
-    () => rule.check(undefined, { target: "user:123" }),
+    () => rule.check(undefined as any, { target: "user:123" } as any),
     TypeError,
   );
 
   // Act & Assert - Missing target in state
-  assertEquals(rule.check({}, { target: "user:123" }), undefined);
+  assertEquals(rule.check({} as any, { target: "user:123" } as any), undefined);
 
   // Act & Assert - Non-array target in state
   assertEquals(
-    rule.check({ target: "not-an-array" }, { target: "user:123" }),
+    rule.check({ target: "not-an-array" } as any, {
+      target: "user:123",
+      from: "user:any",
+    }),
     undefined,
   );
 
   // Act & Assert - Missing target in request
-  assertEquals(rule.check({ target: ["user:123"] }, {}), undefined);
+  assertEquals(rule.check({ target: ["user:123"] }, {} as any), undefined);
 
   // Act & Assert - Null state
   assertThrows(
-    () => rule.check(null, { target: "user:123" }),
+    () => rule.check(null as any, { target: "user:123" } as any),
     TypeError,
   );
 });
@@ -65,16 +68,34 @@ Deno.test("allowTarget - should support wildcards when enabled", () => {
   const state = { target: ["user:*", "group:admin.*"] };
 
   // Act & Assert - User wildcard
-  assertEquals(rule.check(state, { target: "user:123" }), true);
-  assertEquals(rule.check(state, { target: "user:abc" }), true);
+  assertEquals(
+    rule.check(state, { target: "user:123", from: "user:any" }),
+    true,
+  );
+  assertEquals(
+    rule.check(state, { target: "user:abc", from: "user:any" }),
+    true,
+  );
 
   // Act & Assert - Specific group wildcard
-  assertEquals(rule.check(state, { target: "group:admin.users" }), true);
-  assertEquals(rule.check(state, { target: "group:admin.roles" }), true);
+  assertEquals(
+    rule.check(state, { target: "group:admin.users", from: "user:any" }),
+    true,
+  );
+  assertEquals(
+    rule.check(state, { target: "group:admin.roles", from: "user:any" }),
+    true,
+  );
 
   // Act & Assert - Non-matching patterns
-  assertEquals(rule.check(state, { target: "team:123" }), undefined);
-  assertEquals(rule.check(state, { target: "group:users" }), undefined);
+  assertEquals(
+    rule.check(state, { target: "team:123", from: "user:any" }),
+    undefined,
+  );
+  assertEquals(
+    rule.check(state, { target: "group:users", from: "user:any" }),
+    undefined,
+  );
 });
 
 Deno.test("allowTarget - should not use wildcards when disabled", () => {
@@ -83,12 +104,21 @@ Deno.test("allowTarget - should not use wildcards when disabled", () => {
   const state = { target: ["user:*", "group:admin.*"] };
 
   // Act & Assert - Literal matches should work
-  assertEquals(rule.check(state, { target: "user:*" }), true);
-  assertEquals(rule.check(state, { target: "group:admin.*" }), true);
+  assertEquals(rule.check(state, { target: "user:*", from: "user:any" }), true);
+  assertEquals(
+    rule.check(state, { target: "group:admin.*", from: "user:any" }),
+    true,
+  );
 
   // Act & Assert - Pattern matches should not work
-  assertEquals(rule.check(state, { target: "user:123" }), undefined);
-  assertEquals(rule.check(state, { target: "group:admin.users" }), undefined);
+  assertEquals(
+    rule.check(state, { target: "user:123", from: "user:any" }),
+    undefined,
+  );
+  assertEquals(
+    rule.check(state, { target: "group:admin.users", from: "user:any" }),
+    undefined,
+  );
 });
 
 Deno.test("allowTarget - should handle multiple wildcard patterns", () => {
@@ -97,17 +127,35 @@ Deno.test("allowTarget - should handle multiple wildcard patterns", () => {
   const state = { target: ["org:*.users.*", "project:app-*-dev"] };
 
   // Act & Assert - Org pattern matches
-  assertEquals(rule.check(state, { target: "org:example.users.admin" }), true);
-  assertEquals(rule.check(state, { target: "org:acme.users.member" }), true);
+  assertEquals(
+    rule.check(state, { target: "org:example.users.admin", from: "user:any" }),
+    true,
+  );
+  assertEquals(
+    rule.check(state, { target: "org:acme.users.member", from: "user:any" }),
+    true,
+  );
 
   // Act & Assert - Project pattern matches
-  assertEquals(rule.check(state, { target: "project:app-frontend-dev" }), true);
-  assertEquals(rule.check(state, { target: "project:app-backend-dev" }), true);
+  assertEquals(
+    rule.check(state, { target: "project:app-frontend-dev", from: "user:any" }),
+    true,
+  );
+  assertEquals(
+    rule.check(state, { target: "project:app-backend-dev", from: "user:any" }),
+    true,
+  );
 
   // Act & Assert - Non-matching patterns
-  assertEquals(rule.check(state, { target: "org:example.admins" }), undefined);
   assertEquals(
-    rule.check(state, { target: "project:app-frontend-prod" }),
+    rule.check(state, { target: "org:example.admins", from: "user:any" }),
+    undefined,
+  );
+  assertEquals(
+    rule.check(state, {
+      target: "project:app-frontend-prod",
+      from: "user:any",
+    }),
     undefined,
   );
 });

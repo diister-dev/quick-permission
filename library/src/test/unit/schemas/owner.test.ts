@@ -13,7 +13,7 @@ Deno.test("owner schema - should validate correct request structure", () => {
   };
 
   // Act
-  const result = schema.request(validRequest);
+  const result = schema.request?.(validRequest);
 
   // Assert
   assertEquals(result, true);
@@ -24,20 +24,20 @@ Deno.test("owner schema - should invalidate incorrect request structure", () => 
   const schema = owner();
 
   // Act & Assert - Not an object
-  assertEquals(schema.request(null), false);
-  assertEquals(schema.request(undefined), false);
-  assertEquals(schema.request("string"), false);
+  assertEquals(schema.request?.(null), false);
+  assertEquals(schema.request?.(undefined), false);
+  assertEquals(schema.request?.("string"), false);
 
   // Act & Assert - Missing properties
-  assertEquals(schema.request({}), false);
-  assertEquals(schema.request({ from: "user:123" }), false);
-  assertEquals(schema.request({ owner: "user:456" }), false);
+  assertEquals(schema.request?.({}), false);
+  assertEquals(schema.request?.({ from: "user:123" }), false);
+  assertEquals(schema.request?.({ owner: "user:456" }), false);
 
   // Act & Assert - Incorrect property types
-  assertEquals(schema.request({ from: 123, owner: "user:456" }), false);
-  assertEquals(schema.request({ from: "user:123", owner: 456 }), false);
+  assertEquals(schema.request?.({ from: 123, owner: "user:456" }), false);
+  assertEquals(schema.request?.({ from: "user:123", owner: 456 }), false);
   assertEquals(
-    schema.request({ from: ["user:123"], owner: "user:456" }),
+    schema.request?.({ from: ["user:123"], owner: "user:456" }),
     false,
   );
 });

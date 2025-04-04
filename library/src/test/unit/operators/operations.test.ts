@@ -4,18 +4,19 @@
 import { and, merge, not, or } from "../../../operators/operations.ts";
 import { rule } from "../../../core/rule.ts";
 import { assertEquals } from "jsr:@std/assert";
+import { Schema } from "../../../types/schema.ts";
 
 // Mock schemas for testing
 const schema1 = {
   name: "schema1",
-  state: () => true,
-  request: () => true,
+  state: (_obj: unknown): _obj is unknown => true,
+  request: (_obj: unknown): _obj is unknown => true,
 };
 
 const schema2 = {
   name: "schema2",
-  state: () => true,
-  request: () => true,
+  state: (_obj: unknown): _obj is unknown => true,
+  request: (_obj: unknown): _obj is unknown => true,
 };
 
 // Create test rules
@@ -25,12 +26,12 @@ const undefinedRule = rule("undefinedRule", [], () => undefined);
 const stateCheckRule = rule(
   "stateCheckRule",
   [],
-  (state) => state?.value === true,
+  (state: any) => state?.value === true,
 );
 
 // Test state and request objects
-const state = { value: true };
-const request = {};
+const state = { value: true } as never;
+const request = {} as never;
 
 Deno.test("merge - should return true when any rule returns true", () => {
   // Arrange
@@ -170,8 +171,8 @@ Deno.test("not - should leave undefined as undefined", () => {
 
 Deno.test("operators - should work with rules that use state", () => {
   // Arrange
-  const trueState = { value: true };
-  const falseState = { value: false };
+  const trueState = { value: true } as never;
+  const falseState = { value: false } as never;
 
   // Act
   const result1 = stateCheckRule.check(trueState, request);
@@ -191,7 +192,7 @@ Deno.test("operators - should work with complex combinations", () => {
 
   // Act
   const resultTrue = complexRule.check(state, request);
-  const resultFalse = complexRule.check({ value: false }, request);
+  const resultFalse = complexRule.check({ value: false } as never, request);
 
   // Assert
   assertEquals(resultTrue, true); // stateCheckRule is true, and not(falseRule) is true

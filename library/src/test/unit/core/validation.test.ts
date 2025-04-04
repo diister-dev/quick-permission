@@ -1,7 +1,7 @@
 /**
  * Tests for validation functionality
  */
-import { validate, validation } from "../../../core/permission.ts";
+import { validate } from "../../../core/permission.ts";
 import { hierarchy } from "../../../core/hierarchy.ts";
 import { permission } from "../../../core/permission.ts";
 import { assertEquals } from "jsr:@std/assert";
@@ -13,51 +13,55 @@ import {
 // Mock schema that always validates successfully
 const validSchema = {
   name: "validSchema",
-  state: () => true,
-  request: () => true,
+  state: (_obj: unknown): _obj is unknown => true,
+  request: (_obj: unknown): _obj is unknown => true,
 };
 
 // Mock schema that fails state validation
 const invalidStateSchema = {
   name: "invalidStateSchema",
-  state: () => false,
-  request: () => true,
+  state: (_obj: unknown): _obj is unknown => false,
+  request: (_obj: unknown): _obj is unknown => true,
 };
 
 // Mock schema that fails request validation
 const invalidRequestSchema = {
   name: "invalidRequestSchema",
-  state: () => true,
-  request: () => false,
+  state: (_obj: unknown): _obj is unknown => true,
+  request: (_obj: unknown): _obj is unknown => false,
 };
 
 // Mock schema that throws an error during validation
 const errorSchema = {
   name: "errorSchema",
-  state: () => {
+  state: (_obj: unknown): _obj is unknown => {
     throw new Error("Schema state error");
   },
-  request: () => true,
+  request: (_obj: unknown): _obj is unknown => true,
 };
 
 // Mock rules
 const allowRule = {
   name: "allowRule",
+  schemas: [validSchema],
   check: () => true,
 };
 
 const denyRule = {
   name: "denyRule",
+  schemas: [validSchema],
   check: () => false,
 };
 
 const neutralRule = {
   name: "neutralRule",
+  schemas: [validSchema],
   check: () => undefined,
 };
 
 const errorRule = {
   name: "errorRule",
+  schemas: [validSchema],
   check: () => {
     throw new Error("Rule check error");
   },
@@ -67,7 +71,6 @@ Deno.test("validate - should validate successfully with valid schemas and rules"
   // Arrange
   const testPermissions = hierarchy({
     resource: permission({
-      schemas: [validSchema],
       rules: [allowRule],
     }),
   });
@@ -79,9 +82,9 @@ Deno.test("validate - should validate successfully with valid schemas and rules"
   ];
 
   // Act
-  const result = validate(testPermissions, states, "resource", {
+  const result = validate(testPermissions, states as any, "resource", {
     someRequest: "value",
-  });
+  } as never);
 
   // Assert
   assertValidationSuccess(result);
@@ -103,9 +106,9 @@ Deno.test("validate - should fail when schema state validation fails", () => {
   ];
 
   // Act
-  const result = validate(testPermissions, states, "resource", {
+  const result = validate(testPermissions, states as any, "resource", {
     someRequest: "value",
-  });
+  } as never);
 
   // Assert
   assertValidationFailure(result, ["schema"], ["invalidStateSchema"]);
@@ -131,9 +134,9 @@ Deno.test("validate - should fail when schema request validation fails", () => {
   ];
 
   // Act
-  const result = validate(testPermissions, states, "resource", {
+  const result = validate(testPermissions, states as any, "resource", {
     someRequest: "value",
-  });
+  } as never);
 
   // Assert
   assertValidationFailure(result, ["schema"], ["invalidRequestSchema"]);
@@ -159,9 +162,9 @@ Deno.test("validate - should fail when a schema throws an error", () => {
   ];
 
   // Act
-  const result = validate(testPermissions, states, "resource", {
+  const result = validate(testPermissions, states as any, "resource", {
     someRequest: "value",
-  });
+  } as never);
 
   // Assert
   assertValidationFailure(result, ["schema"], ["errorSchema"]);
@@ -184,9 +187,9 @@ Deno.test("validate - should fail when a rule returns false", () => {
   ];
 
   // Act
-  const result = validate(testPermissions, states, "resource", {
+  const result = validate(testPermissions, states as any, "resource", {
     someRequest: "value",
-  });
+  } as never);
 
   // Assert
   assertValidationFailure(result, ["rule"], ["denyRule"]);
@@ -209,9 +212,9 @@ Deno.test("validate - should fail when a rule throws an error", () => {
   ];
 
   // Act
-  const result = validate(testPermissions, states, "resource", {
+  const result = validate(testPermissions, states as any, "resource", {
     someRequest: "value",
-  });
+  } as never);
 
   // Assert
   assertValidationFailure(result, ["rule"], ["errorRule"]);
@@ -234,9 +237,9 @@ Deno.test("validate - should return undefined validity with only neutral rules",
   ];
 
   // Act
-  const result = validate(testPermissions, states, "resource", {
+  const result = validate(testPermissions, states as any, "resource", {
     someRequest: "value",
-  });
+  } as never);
 
   // Assert
   assertEquals(result.valid, false); // The default is false when no explicit allow
@@ -266,9 +269,9 @@ Deno.test("validate - should handle permission hierarchies (parent-child)", () =
   ];
 
   // Act
-  const result = validate(testPermissions, states, "resource.read", {
+  const result = validate(testPermissions, states as any, "resource.read", {
     someRequest: "value",
-  });
+  } as never);
 
   // Assert
   assertValidationSuccess(result);
@@ -297,9 +300,9 @@ Deno.test("validate - should fail if any permission in the hierarchy fails", () 
   ];
 
   // Act
-  const result = validate(testPermissions, states, "resource.read", {
+  const result = validate(testPermissions, states as any, "resource.read", {
     someRequest: "value",
-  });
+  } as never);
 
   // Assert
   assertValidationFailure(result, ["rule"], ["denyRule"]);
@@ -333,9 +336,9 @@ Deno.test("validate - should consider multiple states with OR logic", () => {
   testPermissions.flat.resource.rules = [stateSpecificRule];
 
   // Act
-  const result = validate(testPermissions, states, "resource", {
+  const result = validate(testPermissions, states as any, "resource", {
     someRequest: "value",
-  });
+  } as never);
 
   // Assert
   assertValidationSuccess(result);

@@ -7,7 +7,7 @@ import { assertEquals } from "jsr:@std/assert";
 Deno.test("denySelf - should return false when from equals target", () => {
   // Arrange
   const rule = denySelf();
-  const state = {};
+  const state = { target: [] };
   const request = { from: "user:123", target: "user:123" };
 
   // Act
@@ -20,7 +20,7 @@ Deno.test("denySelf - should return false when from equals target", () => {
 Deno.test("denySelf - should return undefined when from does not equal target", () => {
   // Arrange
   const rule = denySelf();
-  const state = {};
+  const state = { target: [] };
   const request = { from: "user:123", target: "user:456" };
 
   // Act
@@ -33,11 +33,11 @@ Deno.test("denySelf - should return undefined when from does not equal target", 
 Deno.test("denySelf - should return undefined when target is missing", () => {
   // Arrange
   const rule = denySelf();
-  const state = {};
+  const state = { target: [] };
   const request = { from: "user:123" };
 
   // Act
-  const result = rule.check(state, request);
+  const result = rule.check(state, request as any); // Cast to any to bypass TypeScript error
 
   // Assert
   assertEquals(result, undefined);
@@ -46,7 +46,7 @@ Deno.test("denySelf - should return undefined when target is missing", () => {
 Deno.test("denySelf - should check equality strictly", () => {
   // Arrange
   const rule = denySelf();
-  const state = {};
+  const state = { target: [] };
 
   // Test with different representations that should be treated as different
   const testCases = [

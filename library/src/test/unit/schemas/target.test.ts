@@ -14,7 +14,7 @@ Deno.test("target schema - should validate correct state structure", () => {
   const validState: TargetState = { target: ["user:123", "group:admins"] };
 
   // Act
-  const result = schema.state(validState);
+  const result = schema.state?.(validState);
 
   // Assert
   assertEquals(result, true);
@@ -25,17 +25,17 @@ Deno.test("target schema - should invalidate incorrect state structure", () => {
   const schema = target();
 
   // Act & Assert - Not an object
-  assertEquals(schema.state(null), false);
-  assertEquals(schema.state(undefined), false);
-  assertEquals(schema.state("string"), false);
+  assertEquals(schema.state?.(null), false);
+  assertEquals(schema.state?.(undefined), false);
+  assertEquals(schema.state?.("string"), false);
 
   // Act & Assert - Missing target property
-  assertEquals(schema.state({}), false);
+  assertEquals(schema.state?.({}), false);
 
   // Act & Assert - Target is not an array
-  assertEquals(schema.state({ target: "user:123" }), false);
-  assertEquals(schema.state({ target: 123 }), false);
-  assertEquals(schema.state({ target: { value: "user:123" } }), false);
+  assertEquals(schema.state?.({ target: "user:123" }), false);
+  assertEquals(schema.state?.({ target: 123 }), false);
+  assertEquals(schema.state?.({ target: { value: "user:123" } }), false);
 });
 
 Deno.test("target schema - should validate correct request structure", () => {
@@ -47,7 +47,7 @@ Deno.test("target schema - should validate correct request structure", () => {
   };
 
   // Act
-  const result = schema.request(validRequest);
+  const result = schema.request?.(validRequest);
 
   // Assert
   assertEquals(result, true);
@@ -58,20 +58,20 @@ Deno.test("target schema - should invalidate incorrect request structure", () =>
   const schema = target();
 
   // Act & Assert - Not an object
-  assertEquals(schema.request(null), false);
-  assertEquals(schema.request(undefined), false);
-  assertEquals(schema.request("string"), false);
+  assertEquals(schema.request?.(null), false);
+  assertEquals(schema.request?.(undefined), false);
+  assertEquals(schema.request?.("string"), false);
 
   // Act & Assert - Missing properties
-  assertEquals(schema.request({}), false);
-  assertEquals(schema.request({ from: "user:123" }), false);
-  assertEquals(schema.request({ target: "resource:456" }), false);
+  assertEquals(schema.request?.({}), false);
+  assertEquals(schema.request?.({ from: "user:123" }), false);
+  assertEquals(schema.request?.({ target: "resource:456" }), false);
 
   // Act & Assert - Incorrect property types
-  assertEquals(schema.request({ from: 123, target: "resource:456" }), false);
-  assertEquals(schema.request({ from: "user:123", target: 456 }), false);
+  assertEquals(schema.request?.({ from: 123, target: "resource:456" }), false);
+  assertEquals(schema.request?.({ from: "user:123", target: 456 }), false);
   assertEquals(
-    schema.request({ from: ["user:123"], target: "resource:456" }),
+    schema.request?.({ from: ["user:123"], target: "resource:456" }),
     false,
   );
 });
