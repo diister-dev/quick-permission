@@ -1,7 +1,8 @@
 import { rule } from "../../core/rule.ts";
 import { owner } from "../../schemas/owner/owner.ts";
+import type { Rule } from "../../types/rule.ts";
 
-export function allowOwner() {
+export function allowOwner(): Rule<[ReturnType<typeof owner>]> {
   return rule(
     "allowOwner",
     [owner()],

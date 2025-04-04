@@ -26,7 +26,7 @@ export function permission<
   rules?: R;
   children?: C;
   defaultState?: object;
-}) {
+}): Permission<S, R, C> {
   // Extract rules and explicit schemas
   const rules = (content.rules ?? []) as R;
   const explicitSchemas = content.schemas ?? [];

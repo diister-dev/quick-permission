@@ -1,7 +1,8 @@
 import { rule } from "../../core/rule.ts";
 import { time } from "../../schemas/time/time.ts";
+import type { Rule } from "../../types/rule.ts";
 
-export function ensureTime() {
+export function ensureTime(): Rule<[ReturnType<typeof time>]> {
   return rule(
     "ensureTime",
     [time()],
