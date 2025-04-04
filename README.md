@@ -1,14 +1,46 @@
 # Quick Permission
 
-A flexible and type-safe permission system for TypeScript/JavaScript applications.
+[![JSR Latest](https://img.shields.io/jsr/v/@diister/quick-permission)](https://jsr.io/@diister/quick-permission)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
+A flexible and type-safe permission system for TypeScript/JavaScript
+applications.
+
+## Table of Contents
+
+- [Introduction](#introduction)
+- [Installation](#installation)
+- [Core Concepts](#core-concepts)
+- [Basic Usage](#basic-usage)
+- [Advanced Usage](#advanced-usage)
+- [API Reference](#api-reference)
+- [Performance](#performance)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Introduction
 
-Quick Permission is a lightweight library that helps you implement complex permission systems with ease. It provides a hierarchical permission structure with strong TypeScript support, allowing you to define custom permission logic while maintaining type safety.
+Quick Permission is a TypeScript library that provides a flexible, hierarchical
+permission system with strong type safety. It allows you to define complex
+permission rules that can be composed together and validated against multiple
+permission sources.
+
+### Key Features
+
+- **Hierarchical Structure**: Organize permissions in an intuitive tree
+  structure
+- **Strong Type Safety**: Full TypeScript support for permission requests and
+  states
+- **Rule Composition**: Combine rules with AND, OR, and NOT operators
+- **Multiple Permission Sources**: Validate against multiple state sources
+  simultaneously
+- **Performance Focused**: Optimized for efficient validation in large
+  applications
 
 ## Installation
 
 ```bash
+# Install via JSR
 npx jsr add @diister/quick-permission
 ```
 
@@ -16,198 +48,210 @@ npx jsr add @diister/quick-permission
 
 ### Permission Structure
 
-A permission system consists of three main components:
+A permission system in Quick Permission consists of three key components:
 
-1. **Request**: The context of the permission check (what is being requested)
-2. **State**: The permission configuration (what is allowed)
-3. **Validation Logic**: The rules that determine if a request is allowed given a state
+1. **Hierarchy**: A tree structure of permissions organized in parent-child
+   relationships
+2. **Rules**: Functions that determine if a permission is granted based on state
+   and request
+3. **Schemas**: Definitions of the structure and validation of state and request
+   data
 
-### Request & State Pattern
+### Rules and Validation
 
-Each permission defines its own Request and State types:
+Rules evaluate permission requests against permission states and can return:
+
+- `true`: Explicitly grants permission
+- `false`: Explicitly denies permission (short-circuits validation)
+- `undefined`: No opinion (neutral)
+
+The validation logic combines these results to determine if access is granted.
+
+### States Array
+
+The system can check permissions against multiple state sources at once:
 
 ```typescript
-type FileRequest = {
-    user: string;
-    path: string[];
-};
-
-type FileState = {
-    paths: string[][];
-};
+const states = [
+  {
+    // States from direct user grants
+    "resource.view": { target: ["resource:A", "resource:B"] },
+  },
+  {
+    // States from user's group membership
+    "resource.view": { target: ["resource:C", "resource:D"] },
+  },
+];
 ```
 
-The `allowed` function then uses these types to validate permissions:
-```typescript
-allowed(request: FileRequest, state?: FileState): boolean | Promise<boolean>
-```
-
-- **Request**: Contains all the information needed to make a decision (who, what, when, etc.)
-- **State**: Defines the permission configuration (rules, scopes, limits, etc.)
-- **Return**: Boolean indicating if the request is allowed given the state
+Permission is granted if ANY state source allows the request (OR logic).
 
 ## Basic Usage
 
-Let's implement a file system permissions example:
+Here's a simple example implementing file system permissions:
 
 ```typescript
-import { createPermissionHierarchy, PermissionHierarchy } from "@diister/quick-permission";
+import { hierarchy, permission, validate } from "@diister/quick-permission";
+import { allowTarget } from "@diister/quick-permission/rules/allowTarget";
+import { allowOwner } from "@diister/quick-permission/rules/allowOwner";
 
-// Define types for our permission system
-type FileRequest = {
-    user: string;
-    path: string[];
-};
-
-type FileState = {
-    paths: string[][];
-};
-
-// Utility function to check paths
-const isPathAllowed = (requestPath: string[], allowedPaths: string[][]) => {
-    const requestString = requestPath.join('/');
-    return allowedPaths.some(path => requestString.startsWith(path.join('/')));
-};
-
-// Define your permission hierarchy
-const filePermissions = {
-    read: {
-        allowed(request: FileRequest, state?: FileState) {
-            if(!state?.paths) return false;
-            return isPathAllowed(request.path, state.paths);
-        }
+// Create a permission hierarchy
+const filePermissions = hierarchy({
+  files: permission({
+    rules: [allowTarget({ wildcards: true })],
+    children: {
+      read: permission({
+        rules: [allowTarget()],
+      }),
+      write: permission({
+        rules: [allowOwner()],
+      }),
     },
-    write: {
-        allowed(request: FileRequest, state?: FileState) {
-            if(!state?.paths) return false;
-            return isPathAllowed(request.path, state.paths);
-        }
-    }
-} satisfies PermissionHierarchy;
+  }),
+});
 
-// Create the permission checker
-const permissions = createPermissionHierarchy({ file: { children: filePermissions } });
+// Define permission states
+const states = [
+  {
+    "files.read": { target: ["file:public/*", "file:user/123/*"] },
+    "files.write": { target: ["file:user/123/*"] },
+  },
+];
 
-// Define permission set for a user
-const userPermissions = {
-    'file.read': { paths: [['home', 'user1'], ['tmp']] },
-    'file.write': { paths: [['home', 'user1']] }
+// Check a permission request
+const request = {
+  from: "user:123",
+  target: "file:public/document.txt",
 };
 
-// Check permissions
-permissions.can(
-    "file.read", 
-    userPermissions, 
-    { user: 'user1', path: ['home', 'user1', 'document.txt'] }
-); // returns true
+const result = validate(filePermissions, states, "files.read", request);
+console.log(result.allowed); // true
 ```
 
 ## Advanced Usage
 
-### Complex State and Request Example
+### Built-in Rules
 
-Here's an example of an article management system with more complex permissions:
+Quick Permission provides several built-in rules that can be composed together:
+
+- `allowSelf()`: Grants permission when the requester and target are the same
+- `allowOwner()`: Grants permission when the requester is the resource owner
+- `allowTarget()`: Grants permission based on target patterns
+- `denySelf()`: Denies permission when requester and target are the same
+- `ensureTime()`: Validates time-based permissions
+
+### Rule Composition
+
+You can compose rules using logical operators:
 
 ```typescript
-type Article = {
-    id: string;
-    title: string;
-    content: string;
-    owner: string;
-};
+import { and, not, or } from "@diister/quick-permission/operators";
 
-type ArticleRequest = {
-    from?: string;
-    article?: Article;
-};
+const complexPermission = permission({
+  rules: [
+    and([
+      allowTarget(),
+      or([
+        allowOwner(),
+        not(denySelf()),
+      ]),
+    ]),
+  ],
+});
+```
 
-type ArticleState = {
-    scope: string;
-};
+### Default States
 
-const articlesPermissions = {
-    read: {
-        allowed(request: ArticleRequest, state?: ArticleState) {
-            if(state?.scope === '*') return true;
-            if(request?.from === request?.article?.owner) return true;
-            if(request?.article?.id && state?.scope.includes(request.article.id)) return true;
-            return false;
-        },
-        // Optional: validate state structure
-        check(state: ArticleState) {
-            return typeof state.scope === 'string';
-        }
+For rules that need state context to function, you can define default states:
+
+```typescript
+const articlePermission = permission({
+  rules: [allowOwner()],
+  defaultState: { owner: null }, // Minimal required state
+});
+
+// The validate function automatically applies the default state
+// when no explicit state is provided
+```
+
+### Hierarchical Resolution
+
+When a specific permission state is missing, the system will check parent
+permissions:
+
+```typescript
+const hierarchy = {
+  "user": {
+    "content": {
+      "edit": {/* specific rules */},
     },
-    write: {
-        allowed(request: ArticleRequest, state?: ArticleState) {
-            if(state?.scope === '*') return true;
-            if(request?.from === request?.article?.owner) return true;
-            if(request?.article?.id && state?.scope.includes(request.article.id)) return true;
-            return false;
-        }
-    }
-} satisfies PermissionHierarchy;
+  },
+};
+
+// If "user.content.edit" state is missing, the system will check "user.content"
+// This allows for inheritance of permissions from parents to children
 ```
 
-### Understanding Request & State
+## API Reference
 
-1. **Request Object**
-   - Contains the context needed for permission validation
-   - Can include user information, resource details, timestamps, etc.
-   - Passed when checking permissions with `can()`
-   ```typescript
-   const request = { 
-       from: 'user1',
-       article: { id: 'article1', owner: 'user1', title: 'Hello', content: 'World' }
-   };
-   ```
+### Core Functions
 
-2. **State Object**
-   - Defines the permission configuration
-   - Stored in permission sets
-   - Can be as simple or complex as needed
-   ```typescript
-   const permissionSet = {
-       'articles.read': { scope: '*' },              // Global read access
-       'articles.write': { scope: 'article1,article2' } // Limited write access
-   };
-   ```
+- `hierarchy(config)`: Creates a permission hierarchy
+- `permission(options)`: Creates a permission node
+- `validate(hierarchy, states, permissionKey, request)`: Validates a permission
+- `rule(name, schemas, checkFn)`: Creates a custom rule
 
-3. **Default Permissions**
-   - When state is undefined, the `allowed` function can implement default behavior
-   - Useful for implementing "owner always has access" patterns
-   ```typescript
-   allowed(request: ArticleRequest, state?: ArticleState) {
-       // Owner always has access, even without explicit permissions
-       if(request?.from === request?.article?.owner) return true;
-       // Otherwise, require state
-       if(!state) return false;
-       // ... rest of permission logic
-   }
-   ```
-
-### Hierarchical Permissions
-
-Permission sets can define permissions at different levels:
+### Built-in Rules
 
 ```typescript
-const permissionSet = {
-    // Root level permission
-    'articles': { scope: '*' },
-    // Specific permission
-    'articles.read': { scope: 'article1' }
-};
+// Identity and ownership
+allowSelf(); // Checks if request.from === request.target
+allowOwner(); // Checks if request.from === request.owner
+denySelf(); // Inverse of allowSelf()
+
+// Target-based permissions
+allowTarget({ wildcards: true }); // Pattern matching for targets
+
+// Time-based permissions
+ensureTime(); // Validates time constraints
 ```
 
-The validation process:
-1. Checks the exact permission first ('articles.read')
-2. Falls back to parent permissions if needed ('articles')
-3. Uses default permission logic if no permissions match
+### Logical Operators
+
+```typescript
+and([rule1, rule2]); // All rules must return true
+or([rule1, rule2]); // At least one rule must return true
+not(rule); // Inverts the result of a rule
+```
+
+## Performance
+
+Quick Permission is optimized for performance:
+
+- **Hierarchical Structure**: Deeper hierarchies perform better than wide ones
+- **Multiple State Sources**: Efficiently scales with many state sources
+- **Rule Short-Circuiting**: Validation stops when a rule returns false
+
+Performance tips:
+
+1. Place the most restrictive rules first in your rule array
+2. Define explicit states for permissions that will be checked
+3. Use default states for common validation patterns
+
+## Contributing
+
+Contributions are welcome! Please follow these guidelines:
+
+1. Follow TypeScript best practices and maintain type safety
+2. Add tests for new features or bug fixes
+3. Update documentation to reflect changes
+4. Run the benchmark suite to verify performance impact
+
+```bash
+# Run benchmarks
+deno bench library/src/test/benchmarks/validation_benchmark.ts --no-check
+```
 
 ## License
 
 MIT License
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.

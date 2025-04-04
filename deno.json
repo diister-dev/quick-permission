@@ -1,6 +1,13 @@
 {
-    "name": "@diister/quick-permission",
-    "version": "0.4.0",
-    "license": "MIT",
-    "exports": "./mod.ts"
+  "name": "@diister/quick-permission",
+  "version": "0.4.0",
+  "license": "MIT",
+  "exports": "./library/mod.ts",
+  "tasks": {
+    "test": "deno test library/",
+    "fmt": "deno fmt"
+  },
+  "imports": {
+    "jsr:@std/": "https://deno.land/std@0.208.0/"
+  }
 }
