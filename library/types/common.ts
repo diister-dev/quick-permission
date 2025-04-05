@@ -118,14 +118,11 @@ type ComputeHierarchy<
  * Flattens a hierarchy into a structure with paths and values
  * @template H The hierarchy type
  */
-export type FlatHierarchy<H> = H extends Hierarchy
-  ? ComputeHierarchy<H> extends infer F
-    ? F extends { path: infer K; value: infer V } ? K extends string ? {
-          [key in K]: V;
-        }
-      : never
-    : never
-  : never
+export type FlatHierarchy<H> = H extends Hierarchy ? {
+    [key in ComputeHierarchy<H>["path"]]: ComputeHierarchy<H> extends infer F
+      ? F extends { path: key; value: infer V } ? V : never
+      : never;
+  }
   : never;
 
 /**
