@@ -1,6 +1,26 @@
 {
   "name": "@diister/quick-permission",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "license": "MIT",
-  "exports": "./mod.ts"
+  "exports": {
+    ".": "./mod.ts",
+    "./operators": "./operators/mod.ts",
+    "./rules": "./rules/mod.ts",
+    "./schemas": "./schemas/mod.ts",
+    "./rules/allowOwner": "./rules/allowOwner/allowOwner.ts",
+    "./rules/allowSelf": "./rules/allowSelf/allowSelf.ts",
+    "./rules/allowTarget": "./rules/allowTarget/allowTarget.ts",
+    "./rules/denySelf": "./rules/denySelf/denySelf.ts",
+    "./rules/ensureTime": "./rules/ensureTime/ensureTime.ts",
+    "./schemas/owner": "./schemas/owner/owner.ts",
+    "./schemas/target": "./schemas/target/target.ts",
+    "./schemas/time": "./schemas/time/time.ts",
+    "./core/hierarchy": "./core/hierarchy.ts",
+    "./core/permission": "./core/permission.ts",
+    "./core/rule": "./core/rule.ts",
+    "./core/validation": "./core/validation.ts",
+    "./types/common": "./types/common.ts",
+    "./types/rule": "./types/rule.ts",
+    "./types/schema": "./types/schema.ts"
+  }
 }

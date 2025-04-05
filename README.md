@@ -249,7 +249,7 @@ Contributions are welcome! Please follow these guidelines:
 
 ```bash
 # Run benchmarks
-deno bench library/src/test/benchmarks/validation_benchmark.ts --no-check
+deno bench library/test/benchmarks/validation_benchmark.ts --no-check
 ```
 
 ## License
