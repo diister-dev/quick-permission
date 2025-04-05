@@ -93,7 +93,7 @@ export type ExtractSchemasFromRules<R extends Rule<any>[]> = R extends
  * @template K The prefix for paths
  * @template Depth The depth limit for recursion
  */
-type FlatHierarchy<
+type ComputeHierarchy<
   H,
   K extends string = "",
   Depth extends string = "0123456789", // Prevent infinite recursion
@@ -101,17 +101,31 @@ type FlatHierarchy<
     [key in keyof H]: key extends string
       ? H[key] extends Permission<infer S, infer R, infer C> ?
           | { path: `${K}${key}`; value: H[key] }
-          | (C extends Hierarchy ? FlatHierarchy<C, `${K}${key}.`>
+          | (C extends Hierarchy ? ComputeHierarchy<C, `${K}${key}.`>
             : never)
       : H[key] extends infer E
         ? E extends Hierarchy
           ? Depth extends `${infer H}${infer R}`
-            ? FlatHierarchy<E, `${K}${key}.`, R>
+            ? ComputeHierarchy<E, `${K}${key}.`, R>
           : never
         : never
       : never
       : never;
   }[keyof H]
+  : never;
+
+/**
+ * Flattens a hierarchy into a structure with paths and values
+ * @template H The hierarchy type
+ */
+export type FlatHierarchy<H> = H extends Hierarchy
+  ? ComputeHierarchy<H> extends infer F
+    ? F extends { path: infer K; value: infer V } ? K extends string ? {
+          [key in K]: V;
+        }
+      : never
+    : never
+  : never
   : never;
 
 /**
@@ -122,7 +136,8 @@ type FlatHierarchy<
  */
 export type PermissionElement<H, K extends PermissionKey<H>> = H extends
   PermissionHierarchy<infer H>
-  ? FlatHierarchy<H> extends infer F ? F extends { path: K; value: infer V } ? F
+  ? ComputeHierarchy<H> extends infer F
+    ? F extends { path: K; value: infer V } ? F
     : never
   : never
   : never;
@@ -160,7 +175,7 @@ export type PermissionRequests<H, K extends PermissionKey<H>> =
  * @template P The permission hierarchy
  */
 export type PermissionKey<P> = P extends PermissionHierarchy<infer H>
-  ? FlatHierarchy<H>["path"]
+  ? ComputeHierarchy<H>["path"]
   : never;
 
 /**
