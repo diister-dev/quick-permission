@@ -200,14 +200,14 @@ errors.push({
 
 ### Adding a New Rule
 
-1. Create a new directory under `src/rules/[ruleName]/`
+1. Create a new directory under `rules/[ruleName]/`
 2. Implement the rule following the `Rule` interface pattern
 3. Export the rule in the module's entry point
 4. Add tests for the rule
 
 ### Adding a New Schema
 
-1. Create a new directory under `src/schemas/[schemaName]/`
+1. Create a new directory under `schemas/[schemaName]/`
 2. Define the state and request types
 3. Implement validation functions
 4. Export the schema in the module's entry point
@@ -364,10 +364,10 @@ consider running the benchmark suite to verify performance impact:
 
 ```bash
 # Run the standard benchmark suite
-deno bench library/src/test/benchmarks/validation_benchmark.ts --no-check
+deno bench library/test/benchmarks/validation_benchmark.ts --no-check
 
 # Run the progressive scaling tests
-deno bench library/src/test/benchmarks/scaling_benchmark.ts --no-check
+deno bench library/test/benchmarks/scaling_benchmark.ts --no-check
 ```
 
 ## Best Practices from Implementation Experience

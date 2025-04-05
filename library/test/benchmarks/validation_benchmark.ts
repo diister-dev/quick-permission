@@ -1,7 +1,7 @@
 /**
  * Performance benchmarks for quick-permission
  *
- * Run with: deno bench library/src/test/benchmarks/validation_benchmark.ts
+ * Run with: deno bench library/test/benchmarks/validation_benchmark.ts
  */
 
 import { hierarchy, permission, validate } from "../../core/permission.ts";
@@ -211,7 +211,12 @@ Deno.bench("validation - simple hierarchy simple check", () => {
 });
 
 Deno.bench("validation - medium hierarchy simple check", () => {
-  validate(mediumHierarchy, simpleStates, "user.profile.view", simpleRequest);
+  validate(
+    mediumHierarchy,
+    simpleStates as any,
+    "user.profile.view",
+    simpleRequest,
+  );
 });
 
 Deno.bench("validation - medium hierarchy with complete states", () => {
@@ -223,12 +228,12 @@ Deno.bench("validation - deep hierarchy", () => {
     deepHierarchy,
     [{}],
     "level0.level1.level2.level3.level4.level5.level6.level7.level8.level9.leaf",
-    complexRequest,
+    complexRequest as never,
   );
 });
 
 Deno.bench("validation - wide hierarchy", () => {
-  validate(wideHierarchy, [{}], "root.branch50.leaf", complexRequest);
+  validate(wideHierarchy, [{}], "root.branch50.leaf", complexRequest as never);
 });
 
 Deno.bench("validation - with complex operators", () => {
@@ -261,7 +266,12 @@ Deno.bench("validation - with single state source", () => {
 });
 
 Deno.bench("validation - with 10 state sources", () => {
-  validate(smallHierarchy, multipleStateSources, "resource.5", simpleRequest);
+  validate(
+    smallHierarchy,
+    multipleStateSources,
+    "resource.5" as any,
+    simpleRequest,
+  );
 });
 
 // Benchmarks for repeated validations (to test potential caching benefits)
