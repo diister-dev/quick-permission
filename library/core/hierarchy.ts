@@ -3,6 +3,7 @@
  * @module hierarchy
  */
 import type {
+  FlatHierarchy,
   Hierarchy,
   PermissionHierarchy,
   PermissionKey,
@@ -15,7 +16,9 @@ import type {
  * @returns A flattened representation of the hierarchy
  * @throws Error if a circular reference is detected
  */
-export function flatHierarchy(hierarchy: Hierarchy) {
+export function flatHierarchy<H extends Hierarchy>(
+  hierarchy: H,
+): FlatHierarchy<H> {
   const flat: any = {};
   const toTraverse: any[] = [{
     path: "",
