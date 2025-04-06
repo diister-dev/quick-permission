@@ -10,6 +10,26 @@ import { Schema, SchemasRequests, SchemasStates } from "./schema.ts";
 type TODO = any; // TODO: Replace with actual type
 
 /**
+ * Constants defining the possible outcomes of a validation operation
+ * - NEUTRAL: The rule has no opinion (was undefined)
+ * - GRANTED: The rule explicitly allows the permission (was true)
+ * - REJECTED: The rule denies the permission for normal reasons (was false)
+ * - BLOCKED: The rule denies the permission with high priority (override)
+ */
+export const VALIDATION_RESULT = {
+  NEUTRAL: "neutral" as const,
+  GRANTED: "granted" as const,
+  REJECTED: "rejected" as const,
+  BLOCKED: "blocked" as const,
+};
+
+/**
+ * The type of result returned by a rule validation
+ */
+export type ValidationResultType =
+  typeof VALIDATION_RESULT[keyof typeof VALIDATION_RESULT];
+
+/**
  * Represents a processed permission hierarchy with additional metadata
  *
  * @template H The raw hierarchy type
@@ -178,13 +198,32 @@ export type PermissionKey<P> = P extends PermissionHierarchy<infer H>
 /**
  * Represents a permission state set for a hierarchy
  *
- * Maps permission keys to their states
+ * Maps permission keys to their states or arrays of states
  *
  * @template H The permission hierarchy
  */
 export type PermissionStateSet<H> = {
-  [K in PermissionKey<H>]?: PermissionStates<H, K>;
+  [K in PermissionKey<H>]?: PermissionStates<H, K> | PermissionStates<H, K>[];
 };
+
+/**
+ * Represents a flat permission state entry using a tuple format
+ * This format is easier to store in databases as it avoids nested objects
+ *
+ * @template H The permission hierarchy
+ */
+export type PermissionStateTuple<H> = [
+  PermissionKey<H>,
+  PermissionStates<H, PermissionKey<H>>,
+];
+
+/**
+ * Represents a flat array of permission state entries
+ * This is an alternative to PermissionStateSet that uses tuples instead of an object
+ *
+ * @template H The permission hierarchy
+ */
+export type FlatPermissionStateArray<H> = PermissionStateTuple<H>[];
 
 /**
  * Describes an error that occurred during permission validation
@@ -210,4 +249,6 @@ export type ValidationResult = {
   valid: boolean;
   /** List of errors if validation failed */
   reasons: ValidationError[];
+  /** The detailed validation result type (for internal use) */
+  resultType?: ValidationResultType;
 };

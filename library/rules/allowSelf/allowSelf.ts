@@ -19,7 +19,7 @@
  *
  * // When validating:
  * // If request.from === request.target -> permission granted
- * // Otherwise -> rule returns undefined (no opinion)
+ * // Otherwise -> rule returns "neutral" (no opinion)
  * ```
  *
  * @returns A rule that validates self-referential permissions
@@ -34,11 +34,11 @@ export function allowSelf(): Rule<[ReturnType<typeof target>]> {
     [target()],
     (_state, request) => {
       if (request.from === request.target) {
-        return true;
+        return "granted";
       }
 
       // Not handled by this validation
-      return undefined;
+      return "neutral";
     },
   );
 }

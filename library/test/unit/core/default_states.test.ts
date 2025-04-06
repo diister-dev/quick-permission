@@ -128,8 +128,10 @@ Deno.test("Default States - Schema default states get applied correctly", () => 
   const defaultStates = createDefaultStateSet(permissionWithAllSchemas);
 
   // Test - Default state for target schema should have empty target array
-  assertEquals(Array.isArray(defaultStates.resource?.target), true);
-  assertEquals(defaultStates.resource?.target.length, 0);
+  assertEquals(defaultStates.resource !== undefined, true);
+  const resourceState = defaultStates.resource as { target: string[] };
+  assertEquals(Array.isArray(resourceState.target), true);
+  assertEquals(resourceState.target.length, 0);
 
   // Override with customized states
   const customStates = {
@@ -160,10 +162,15 @@ Deno.test("Default States - Permission with custom defaultState", () => {
   const defaultStates = createDefaultStateSet(customDefaultPermissions);
 
   // Test - Default state should incorporate custom values
-  assertEquals(Array.isArray(defaultStates.custom?.target), true);
-  assertEquals(defaultStates.custom?.target.length, 1);
-  assertEquals(defaultStates.custom?.target[0], "default:target");
-  assertEquals((defaultStates.custom as any).customValue, "test");
+  assertEquals(defaultStates.custom !== undefined, true);
+  const customState = defaultStates.custom as {
+    target: string[];
+    customValue: string;
+  };
+  assertEquals(Array.isArray(customState.target), true);
+  assertEquals(customState.target.length, 1);
+  assertEquals(customState.target[0], "default:target");
+  assertEquals(customState.customValue, "test");
 });
 
 Deno.test("Default States - Automatic application of default states in validate()", () => {

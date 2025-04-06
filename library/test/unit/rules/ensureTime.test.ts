@@ -4,7 +4,7 @@
 import { ensureTime } from "../../../rules/ensureTime/ensureTime.ts";
 import { assertEquals } from "jsr:@std/assert";
 
-Deno.test("ensureTime - should return undefined when no time constraints exist", () => {
+Deno.test('ensureTime - should return "neutral" when no time constraints exist', () => {
   // Arrange
   const rule = ensureTime();
   const state = {};
@@ -14,10 +14,10 @@ Deno.test("ensureTime - should return undefined when no time constraints exist",
   const result = rule.check(state, request);
 
   // Assert
-  assertEquals(result, undefined);
+  assertEquals(result, "neutral");
 });
 
-Deno.test("ensureTime - should return false when current date is before dateStart", () => {
+Deno.test('ensureTime - should return "rejected" when current date is before dateStart', () => {
   // Arrange
   const rule = ensureTime();
   const now = new Date();
@@ -28,10 +28,10 @@ Deno.test("ensureTime - should return false when current date is before dateStar
   const result = rule.check(state, {});
 
   // Assert
-  assertEquals(result, false);
+  assertEquals(result, "rejected");
 });
 
-Deno.test("ensureTime - should return undefined when current date is after dateStart", () => {
+Deno.test('ensureTime - should return "neutral" when current date is after dateStart', () => {
   // Arrange
   const rule = ensureTime();
   const now = new Date();
@@ -42,10 +42,10 @@ Deno.test("ensureTime - should return undefined when current date is after dateS
   const result = rule.check(state, {});
 
   // Assert
-  assertEquals(result, undefined);
+  assertEquals(result, "neutral");
 });
 
-Deno.test("ensureTime - should return false when current date is after dateEnd", () => {
+Deno.test('ensureTime - should return "rejected" when current date is after dateEnd', () => {
   // Arrange
   const rule = ensureTime();
   const now = new Date();
@@ -56,10 +56,10 @@ Deno.test("ensureTime - should return false when current date is after dateEnd",
   const result = rule.check(state, {});
 
   // Assert
-  assertEquals(result, false);
+  assertEquals(result, "rejected");
 });
 
-Deno.test("ensureTime - should return undefined when current date is before dateEnd", () => {
+Deno.test('ensureTime - should return "neutral" when current date is before dateEnd', () => {
   // Arrange
   const rule = ensureTime();
   const now = new Date();
@@ -70,7 +70,7 @@ Deno.test("ensureTime - should return undefined when current date is before date
   const result = rule.check(state, {});
 
   // Assert
-  assertEquals(result, undefined);
+  assertEquals(result, "neutral");
 });
 
 Deno.test("ensureTime - should consider both dateStart and dateEnd constraints", () => {
@@ -104,9 +104,9 @@ Deno.test("ensureTime - should consider both dateStart and dateEnd constraints",
   const resultInvalidEnd = rule.check(invalidStateEnd, {});
 
   // Assert
-  assertEquals(resultValid, undefined);
-  assertEquals(resultInvalidStart, false);
-  assertEquals(resultInvalidEnd, false);
+  assertEquals(resultValid, "neutral");
+  assertEquals(resultInvalidStart, "rejected");
+  assertEquals(resultInvalidEnd, "rejected");
 });
 
 Deno.test("ensureTime - should use request date when provided", () => {
@@ -127,7 +127,7 @@ Deno.test("ensureTime - should use request date when provided", () => {
   const resultAfter = rule.check(state, { date: new Date(2023, 0, 25) }); // Jan 25, 2023
 
   // Assert
-  assertEquals(resultBefore, false); // Before start date
-  assertEquals(resultDuring, undefined); // Within range
-  assertEquals(resultAfter, false); // After end date
+  assertEquals(resultBefore, "rejected"); // Before start date
+  assertEquals(resultDuring, "neutral"); // Within range
+  assertEquals(resultAfter, "rejected"); // After end date
 });

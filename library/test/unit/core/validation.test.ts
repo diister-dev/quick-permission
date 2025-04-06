@@ -9,6 +9,10 @@ import {
   assertValidationFailure,
   assertValidationSuccess,
 } from "../../helpers/test_utils.ts";
+import {
+  VALIDATION_RESULT,
+  ValidationResultType,
+} from "../../../types/common.ts";
 
 // Mock schema that always validates successfully
 const validSchema = {
@@ -44,19 +48,25 @@ const errorSchema = {
 const allowRule = {
   name: "allowRule",
   schemas: [validSchema],
-  check: () => true,
+  check: () => VALIDATION_RESULT.GRANTED,
 };
 
 const denyRule = {
   name: "denyRule",
   schemas: [validSchema],
-  check: () => false,
+  check: () => VALIDATION_RESULT.REJECTED,
 };
 
 const neutralRule = {
   name: "neutralRule",
   schemas: [validSchema],
-  check: () => undefined,
+  check: () => VALIDATION_RESULT.NEUTRAL,
+};
+
+const blockedRule = {
+  name: "blockedRule",
+  schemas: [validSchema],
+  check: () => VALIDATION_RESULT.BLOCKED,
 };
 
 const errorRule = {
@@ -171,7 +181,7 @@ Deno.test("validate - should fail when a schema throws an error", () => {
   assertEquals(result.reasons[0].message, "Schema state error");
 });
 
-Deno.test("validate - should fail when a rule returns false", () => {
+Deno.test("validate - should fail when a rule returns rejected", () => {
   // Arrange
   const testPermissions = hierarchy({
     resource: permission({
@@ -221,7 +231,7 @@ Deno.test("validate - should fail when a rule throws an error", () => {
   assertEquals(result.reasons[0].message, "Rule check error");
 });
 
-Deno.test("validate - should return undefined validity with only neutral rules", () => {
+Deno.test("validate - should return invalid with only neutral rules", () => {
   // Arrange
   const testPermissions = hierarchy({
     resource: permission({
@@ -244,6 +254,31 @@ Deno.test("validate - should return undefined validity with only neutral rules",
   // Assert
   assertEquals(result.valid, false); // The default is false when no explicit allow
   assertEquals(result.reasons.length, 0);
+});
+
+Deno.test("validate - should fail when a rule returns blocked", () => {
+  // Arrange
+  const testPermissions = hierarchy({
+    resource: permission({
+      schemas: [validSchema],
+      rules: [blockedRule],
+    }),
+  });
+
+  const states = [
+    {
+      "resource": { someState: "value" },
+    },
+  ];
+
+  // Act
+  const result = validate(testPermissions, states as any, "resource", {
+    someRequest: "value",
+  } as never);
+
+  // Assert
+  assertValidationFailure(result, ["rule"], ["blockedRule"]);
+  assertEquals(result.reasons[0].message, "Access blocked: blockedRule");
 });
 
 Deno.test("validate - should handle permission hierarchies (parent-child)", () => {
@@ -281,12 +316,12 @@ Deno.test("validate - should fail if any permission in the hierarchy fails", () 
   // Arrange
   const testPermissions = hierarchy({
     resource: permission({
-      schemas: [validSchema],
-      rules: [denyRule], // Parent denies
+      // Parent with denyRule
+      rules: [denyRule],
       children: {
         read: permission({
-          schemas: [validSchema],
-          rules: [allowRule], // Child allows
+          // Child with allowRule
+          rules: [allowRule],
         }),
       },
     }),
@@ -294,7 +329,7 @@ Deno.test("validate - should fail if any permission in the hierarchy fails", () 
 
   const states = [
     {
-      "resource": { parentState: "value" },
+      "resource": { someState: "value" },
       "resource.read": { childState: "value" },
     },
   ];
@@ -329,7 +364,11 @@ Deno.test("validate - should consider multiple states with OR logic", () => {
   // Create a special rule that checks state value
   const stateSpecificRule = {
     name: "stateSpecificRule",
-    check: (state: any) => state.state === "allowing",
+    schemas: [],
+    check: (state: any) =>
+      state.state === "allowing"
+        ? VALIDATION_RESULT.GRANTED
+        : VALIDATION_RESULT.REJECTED,
   };
 
   // Override the rules for the test
