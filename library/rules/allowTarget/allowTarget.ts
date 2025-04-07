@@ -64,25 +64,25 @@ export function allowTarget(
     [target()],
     (state, request) => {
       if (!state.target || !Array.isArray(state.target)) {
-        return undefined;
+        return "neutral";
       }
 
       // Direct match without wildcards
       if (state.target.includes(request.target)) {
-        return true;
+        return "granted";
       }
 
       // Wildcard matching if enabled
       if (wildcards) {
         for (const pattern of state.target) {
           if (matchWildcard(pattern, request.target, wildcardChar)) {
-            return true;
+            return "granted";
           }
         }
       }
 
       // Not handled by this validation
-      return undefined;
+      return "neutral";
     },
   );
 }

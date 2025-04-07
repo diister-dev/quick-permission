@@ -11,6 +11,7 @@
  * - Are composable using logical operators
  * - Use schemas to enforce type safety
  */
+import { ValidationResultType } from "../types/common.ts";
 import type { Rule } from "../types/rule.ts";
 import type {
   Schema,
@@ -71,7 +72,7 @@ export function rule<
   checkFn: (
     state: SchemasStates<S>,
     request: SchemasRequests<S>,
-  ) => boolean | undefined,
+  ) => ValidationResultType,
 ): Rule<S> {
   return {
     name,

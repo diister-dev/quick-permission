@@ -146,25 +146,27 @@ Important implementation details:
 
 ## Rule Return Values and Logic
 
-Rules can return three possible values with specific meanings:
+Rules can return four possible string values with specific meanings:
 
-- `true`: Explicitly grants permission
-- `false`: Explicitly denies permission
-- `undefined`: No opinion (neutral)
+- `"granted"`: Explicitly grants permission
+- `"rejected"`: Explicitly denies permission
+- `"neutral"`: No opinion (neutral)
+- `"blocked"`: High-priority denial (overrides other results)
 
 The validation logic works as follows:
 
-- A rule returning `false` immediately denies permission (short-circuit)
-- A rule must explicitly return `true` to grant permission
-- If all rules return `undefined`, permission is denied by default
+- A rule returning `"rejected"` or `"blocked"` immediately denies permission
+  (short-circuit)
+- A rule must explicitly return `"granted"` to grant permission
+- If all rules return `"neutral"`, permission is denied by default
 - You can combine rules with operators like `and`, `or`, and `not` to create
   complex logic
 
 ```typescript
-// Return true explicitly to allow
+// Return "granted" explicitly to allow
 check: ((state, request) => {
-  if (conditionMet) return true;
-  return undefined; // No opinion
+  if (conditionMet) return "granted";
+  return "neutral"; // No opinion
 });
 ```
 
@@ -229,7 +231,14 @@ export function myRule(options?: MyRuleOptions): Rule<[Schema1, Schema2]> {
     schemas: [schema1(), schema2()],
     check: (state, request) => {
       // Implementation
-      // Return true/false or undefined
+      // Return "granted", "rejected", "neutral", or "blocked"
+      if (permitCondition) {
+        return "granted";
+      }
+      if (denyCondition) {
+        return "rejected";
+      }
+      return "neutral"; // No opinion on this request
     },
   };
 }
@@ -324,7 +333,7 @@ const result = validate(permissions, states, "permission.key", request);
 printValidationResults(result);
 ```
 
-When debugging issues with rules returning `undefined`:
+When debugging issues with rules returning `"neutral"`:
 
 ```typescript
 // You can create a debugging rule that logs the state and request
@@ -334,7 +343,7 @@ const debugRule = rule(
   (state, request) => {
     console.log("State:", state);
     console.log("Request:", request);
-    return undefined; // Neutral, won't affect validation
+    return "neutral"; // Neutral, won't affect validation
   },
 );
 
