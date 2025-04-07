@@ -8,7 +8,7 @@
 import { allowOwner } from "../../../rules/allowOwner/allowOwner.ts";
 import { assertEquals } from "jsr:@std/assert";
 
-Deno.test("allowOwner - should return true when ownership check passes (requester is owner)", () => {
+Deno.test('allowOwner - should return "granted" when ownership check passes (requester is owner)', () => {
   // Arrange
   const rule = allowOwner();
   const state = {};
@@ -22,10 +22,10 @@ Deno.test("allowOwner - should return true when ownership check passes (requeste
   const result = rule.check(state, request);
 
   // Assert
-  assertEquals(result, true);
+  assertEquals(result, "granted");
 });
 
-Deno.test("allowOwner - should return undefined when ownership check fails (requester is not owner)", () => {
+Deno.test('allowOwner - should return "neutral" when ownership check fails (requester is not owner)', () => {
   // Arrange
   const rule = allowOwner();
   const state = {};
@@ -39,10 +39,10 @@ Deno.test("allowOwner - should return undefined when ownership check fails (requ
   const result = rule.check(state, request);
 
   // Assert
-  assertEquals(result, undefined);
+  assertEquals(result, "neutral");
 });
 
-Deno.test("allowOwner - should return undefined when owner is missing (cannot perform ownership check)", () => {
+Deno.test('allowOwner - should return "neutral" when owner is missing (cannot perform ownership check)', () => {
   // Arrange
   const rule = allowOwner();
   const state = {};
@@ -55,7 +55,7 @@ Deno.test("allowOwner - should return undefined when owner is missing (cannot pe
   const result = rule.check(state, request as any); // Cast to any to bypass TypeScript error
 
   // Assert
-  assertEquals(result, undefined);
+  assertEquals(result, "neutral");
 });
 
 Deno.test("allowOwner - should check ownership equality strictly", () => {
@@ -69,25 +69,25 @@ Deno.test("allowOwner - should check ownership equality strictly", () => {
       from: "user:alice",
       owner: "USER:alice",
       target: "document:123",
-      expected: undefined,
+      expected: "neutral",
     },
     {
       from: "user:alice",
       owner: "user:Alice",
       target: "document:123",
-      expected: undefined,
+      expected: "neutral",
     },
     {
       from: "user:alice",
       owner: "user:alice ",
       target: "document:123",
-      expected: undefined,
+      expected: "neutral",
     },
     {
       from: "user:alice",
       owner: " user:alice",
       target: "document:123",
-      expected: undefined,
+      expected: "neutral",
     },
   ];
 

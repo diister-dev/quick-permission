@@ -269,7 +269,7 @@ Deno.bench("validation - with 10 state sources", () => {
   validate(
     smallHierarchy,
     multipleStateSources,
-    "resource.5" as any,
+    "user.view",
     simpleRequest,
   );
 });

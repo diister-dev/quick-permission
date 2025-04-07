@@ -9,7 +9,7 @@ import { hierarchy, permission, validate } from "../../core/permission.ts";
 import { allowOwner } from "../../rules/allowOwner/allowOwner.ts";
 import { allowSelf } from "../../rules/allowSelf/allowSelf.ts";
 import { allowTarget } from "../../rules/allowTarget/allowTarget.ts";
-import { and, not, or } from "../../operators/operations.ts";
+import { and, merge, not, or } from "../../operators/operations.ts";
 import { assertEquals } from "jsr:@std/assert";
 import {
   assertValidationFailure,
@@ -170,12 +170,12 @@ Deno.test("Identity and Ownership - Issue tracker with combined patterns", () =>
         reopen: permission({
           // Cannot reopen issues assigned to themselves (to prevent abuse)
           // allowSelf() checks if from === target (user is the assignee)
-          rules: [and([not(allowSelf()), allowTarget({ wildcards: true })])],
+          rules: [not(allowSelf()), allowTarget({ wildcards: true })],
         }),
         delete: permission({
           // Cannot delete issues they own (to maintain accountability)
           // allowOwner() checks if from === owner (user is the issue creator/owner)
-          rules: [and([not(allowOwner()), allowTarget({ wildcards: true })])],
+          rules: [not(allowOwner()), allowTarget({ wildcards: true })],
         }),
       },
     }),

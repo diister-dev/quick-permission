@@ -8,7 +8,7 @@
 import { allowSelf } from "../../../rules/allowSelf/allowSelf.ts";
 import { assertEquals } from "jsr:@std/assert";
 
-Deno.test("allowSelf - should return true when identity check passes (from equals target)", () => {
+Deno.test('allowSelf - should return "granted" when identity check passes (from equals target)', () => {
   // Arrange
   const rule = allowSelf();
   const state = {
@@ -23,10 +23,10 @@ Deno.test("allowSelf - should return true when identity check passes (from equal
   const result = rule.check(state, request);
 
   // Assert
-  assertEquals(result, true);
+  assertEquals(result, "granted");
 });
 
-Deno.test("allowSelf - should return undefined when identity check fails (from differs from target)", () => {
+Deno.test('allowSelf - should return "neutral" when identity check fails (from differs from target)', () => {
   // Arrange
   const rule = allowSelf();
   const state = {
@@ -41,10 +41,10 @@ Deno.test("allowSelf - should return undefined when identity check fails (from d
   const result = rule.check(state, request);
 
   // Assert
-  assertEquals(result, undefined);
+  assertEquals(result, "neutral");
 });
 
-Deno.test("allowSelf - should return undefined when target is missing (cannot perform identity check)", () => {
+Deno.test('allowSelf - should return "neutral" when target is missing (cannot perform identity check)', () => {
   // Arrange
   const rule = allowSelf();
   const state = {
@@ -56,7 +56,7 @@ Deno.test("allowSelf - should return undefined when target is missing (cannot pe
   const result = rule.check(state, request as any); // Cast to any to bypass TypeScript error
 
   // Assert
-  assertEquals(result, undefined);
+  assertEquals(result, "neutral");
 });
 
 Deno.test("allowSelf - should check identity equality strictly", () => {
@@ -68,10 +68,10 @@ Deno.test("allowSelf - should check identity equality strictly", () => {
 
   // Test with different representations that should be treated as different identities
   const testCases = [
-    { from: "user:alice", target: "USER:alice", expected: undefined },
-    { from: "user:alice", target: "user:Alice", expected: undefined },
-    { from: "user:alice", target: "user:alice ", expected: undefined },
-    { from: "user:alice", target: " user:alice", expected: undefined },
+    { from: "user:alice", target: "USER:alice", expected: "neutral" },
+    { from: "user:alice", target: "user:Alice", expected: "neutral" },
+    { from: "user:alice", target: "user:alice ", expected: "neutral" },
+    { from: "user:alice", target: " user:alice", expected: "neutral" },
   ];
 
   // Act & Assert

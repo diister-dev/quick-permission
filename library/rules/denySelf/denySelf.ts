@@ -6,7 +6,7 @@
  * same as the target of the request. It's useful for preventing self-actions in
  * scenarios like approvals, moderation, or escalations.
  *
- * Note that when this rule returns `false`, it short-circuits validation and
+ * Note that when this rule returns "rejected", it short-circuits validation and
  * immediately denies the permission.
  *
  * The rule uses the target schema to enforce the correct structure for state and request.
@@ -30,7 +30,7 @@
  *
  * // When validating:
  * // If request.from === request.target -> permission denied
- * // Otherwise -> rule returns undefined (no opinion)
+ * // Otherwise -> rule returns "neutral" (no opinion)
  * ```
  *
  * @returns A rule that denies self-referential permissions
@@ -45,11 +45,11 @@ export function denySelf(): Rule<[ReturnType<typeof target>]> {
     [target()],
     (_state, request) => {
       if (request.from === request.target) {
-        return false;
+        return "rejected";
       }
 
       // Not handled by this validation
-      return undefined;
+      return "neutral";
     },
   );
 }

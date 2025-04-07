@@ -2,11 +2,15 @@
  * Permission Rule Operators
  *
  * This module provides logical operators for combining permission rules to create
- * complex validation logic. The operators follow standard boolean logic patterns
- * while respecting the tri-state nature of permission rules (true, false, undefined).
+ * complex validation logic. The operators follow standard logic patterns
+ * while respecting the validation result types ("granted", "rejected", "neutral", "blocked").
  */
 import { rule } from "../core/rule.ts";
-import { ExtractSchemasFromRules } from "../types/common.ts";
+import {
+  ExtractSchemasFromRules,
+  VALIDATION_RESULT,
+  ValidationResultType,
+} from "../types/common.ts";
 import type { Rule } from "../types/rule.ts";
 import type { Schema } from "../types/schema.ts";
 
@@ -14,9 +18,9 @@ import type { Schema } from "../types/schema.ts";
  * Merges multiple rules into a single rule.
  *
  * This operator combines rules where:
- * - If any rule returns false, the result is false (short-circuit)
- * - If any rule returns true, the result is true
- * - Otherwise, the result is undefined
+ * - If any rule returns "rejected" or "blocked", the result follows that (short-circuit)
+ * - If any rule returns "granted", the result is "granted"
+ * - Otherwise, the result is "neutral"
  *
  * This is useful for collecting multiple rules that contribute to a permission
  * without requiring all of them to explicitly allow.
@@ -34,13 +38,20 @@ export function merge<const R extends Rule<any>[]>(
     "merge",
     schemas,
     (state, request) => {
-      let valid = undefined;
+      let valid: ValidationResultType = VALIDATION_RESULT.NEUTRAL;
       for (const rule of rules) {
         const result = rule.check(state, request);
-        if (result === false) return false;
-        if (result === true) valid = true;
+        if (result === VALIDATION_RESULT.REJECTED) {
+          return VALIDATION_RESULT.REJECTED;
+        }
+        if (result === VALIDATION_RESULT.BLOCKED) {
+          return VALIDATION_RESULT.BLOCKED;
+        }
+        if (result === VALIDATION_RESULT.GRANTED) {
+          valid = VALIDATION_RESULT.GRANTED;
+        }
       }
-      return valid ? true : undefined;
+      return valid;
     },
   );
 }
@@ -48,10 +59,10 @@ export function merge<const R extends Rule<any>[]>(
 /**
  * Combines rules with AND logic.
  *
- * This operator requires that all rules return true for the result to be true:
- * - If any rule returns false, the result is false (short-circuit)
- * - If all rules return true, the result is true
- * - If any rule returns undefined and none return false, the result is undefined
+ * This operator requires that all rules return "granted" for the result to be "granted":
+ * - If any rule returns "rejected" or "blocked", the result follows that (short-circuit)
+ * - If all rules return "granted", the result is "granted"
+ * - If any rule returns "neutral" and none return "rejected" or "blocked", the result is "neutral"
  *
  * @param rules Array of rules to combine with AND logic
  * @returns A single rule that applies AND logic to all input rules
@@ -66,13 +77,18 @@ export function and<const R extends Rule<any>[]>(
     "and",
     schemas,
     (state, request) => {
-      let allTrue = true;
+      let allGranted = true;
       for (const rule of rules) {
         const result = rule.check(state, request);
-        if (result === false) return false;
-        if (result === undefined) allTrue = false;
+        if (result === VALIDATION_RESULT.REJECTED) {
+          return VALIDATION_RESULT.REJECTED;
+        }
+        if (result === VALIDATION_RESULT.BLOCKED) {
+          return VALIDATION_RESULT.BLOCKED;
+        }
+        if (result === VALIDATION_RESULT.NEUTRAL) allGranted = false;
       }
-      return allTrue ? true : undefined;
+      return allGranted ? VALIDATION_RESULT.GRANTED : VALIDATION_RESULT.NEUTRAL;
     },
   );
 }
@@ -80,11 +96,11 @@ export function and<const R extends Rule<any>[]>(
 /**
  * Combines rules with OR logic.
  *
- * This operator requires that at least one rule return true for the result to be true:
- * - If any rule returns true, the result is true (short-circuit success)
- * - Otherwise, the result is undefined
+ * This operator requires that at least one rule return "granted" for the result to be "granted":
+ * - If any rule returns "granted", the result is "granted" (short-circuit success)
+ * - Otherwise, the result is "neutral"
  *
- * Note: OR does not return false because undefined is treated as "no opinion",
+ * Note: OR does not return "rejected" because "neutral" is treated as "no opinion",
  * and the absence of any positive opinion is not a denial.
  *
  * @param rules Array of rules to combine with OR logic
@@ -102,9 +118,11 @@ export function or<const R extends Rule<any>[]>(
     (state, request) => {
       for (const rule of rules) {
         const result = rule.check(state, request);
-        if (result === true) return true;
+        if (result === VALIDATION_RESULT.GRANTED) {
+          return VALIDATION_RESULT.GRANTED;
+        }
       }
-      return undefined;
+      return VALIDATION_RESULT.NEUTRAL;
     },
   );
 }
@@ -113,9 +131,10 @@ export function or<const R extends Rule<any>[]>(
  * Inverts the result of a rule.
  *
  * This operator applies NOT logic to a rule's result:
- * - If the rule returns true, the result is false
- * - If the rule returns false, the result is true
- * - If the rule returns undefined, the result is undefined
+ * - If the rule returns "granted", the result is "rejected"
+ * - If the rule returns "rejected", the result is "granted"
+ * - If the rule returns "neutral", the result is "neutral"
+ * - If the rule returns "blocked", the result is "granted"
  *
  * @param inputRule Rule to invert
  * @returns A rule that returns the logical inverse of the input rule
@@ -128,9 +147,14 @@ export function not<const R extends Rule<any>>(
     inputRule.schemas,
     (state, request) => {
       const result = inputRule.check(state, request);
-      if (result === true) return false;
-      if (result === false) return true;
-      return undefined;
+      if (result === VALIDATION_RESULT.GRANTED) {
+        return VALIDATION_RESULT.REJECTED;
+      }
+      if (
+        result === VALIDATION_RESULT.REJECTED ||
+        result === VALIDATION_RESULT.BLOCKED
+      ) return VALIDATION_RESULT.GRANTED;
+      return VALIDATION_RESULT.NEUTRAL;
     },
   );
 }

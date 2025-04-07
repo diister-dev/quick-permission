@@ -3,6 +3,7 @@
  */
 import { permission } from "../../../core/permission.ts";
 import { assertEquals } from "jsr:@std/assert";
+import { VALIDATION_RESULT } from "../../../types/common.ts";
 
 // Create a mock schema
 const mockSchema1 = {
@@ -26,21 +27,21 @@ const mockSchema2 = {
 const mockRule1 = {
   name: "rule1",
   schemas: [mockSchema1],
-  check: () => true,
+  check: () => VALIDATION_RESULT.GRANTED,
 };
 
 // Create a mock rule with schema2
 const mockRule2 = {
   name: "rule2",
   schemas: [mockSchema2],
-  check: () => true,
+  check: () => VALIDATION_RESULT.GRANTED,
 };
 
 // Create a mock rule without schemas
 const mockRuleNoSchema = {
   name: "ruleNoSchema",
   schemas: [],
-  check: () => true,
+  check: () => VALIDATION_RESULT.GRANTED,
 };
 
 Deno.test("permission - should create a permission object with correct type", () => {
