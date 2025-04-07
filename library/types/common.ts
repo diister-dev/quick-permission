@@ -233,8 +233,6 @@ export type ValidationError = {
   type: "schema" | "rule";
   /** The name of the rule or schema */
   name: string;
-  /** The permission key where the error occurred */
-  permissionKey: string;
   /** Human-readable error message */
   message: string;
   /** Index of the state where the error occurred (for multiple states) */

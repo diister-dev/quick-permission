@@ -25,7 +25,7 @@ Deno.test("Default States - Using createDefaultStateSet to avoid hierarchy fallb
           children: {
             edit: permission({
               // This rule requires owner validation
-              rules: [allowOwner()],
+              rules: [allowTarget({ wildcards: true }), allowOwner()],
             }),
           },
         }),

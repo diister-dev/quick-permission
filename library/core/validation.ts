@@ -42,7 +42,6 @@ function allow(
         errors.push({
           type: "schema",
           name: schema.name || "unnamed",
-          permissionKey: permKey,
           message: `Invalid state for schema ${schema.name}`,
         });
       }
@@ -50,7 +49,6 @@ function allow(
         errors.push({
           type: "schema",
           name: schema.name || "unnamed",
-          permissionKey: permKey,
           message: `Invalid request for schema ${schema.name}`,
         });
       }
@@ -58,7 +56,6 @@ function allow(
       errors.push({
         type: "schema",
         name: schema.name || "unnamed",
-        permissionKey: permKey,
         message: error instanceof Error ? error.message : String(error),
       });
     }
@@ -87,7 +84,6 @@ function allow(
         errors.push({
           type: "rule",
           name: rule.name || "unnamed",
-          permissionKey: permKey,
           message: `Access blocked: ${rule.name || "unnamed"}`,
         });
         return { valid: VALIDATION_RESULT.BLOCKED, errors };
@@ -98,7 +94,6 @@ function allow(
         errors.push({
           type: "rule",
           name: rule.name || "unnamed",
-          permissionKey: permKey,
           message: `Rule not satisfied: ${rule.name || "unnamed"}`,
         });
         return { valid: VALIDATION_RESULT.REJECTED, errors };
@@ -112,10 +107,12 @@ function allow(
         resultType = VALIDATION_RESULT.GRANTED;
       }
     } catch (error) {
+      const errorExist = errors.find(
+        (e) => e.type === "rule" && e.name === rule.name,
+      );
       errors.push({
         type: "rule",
         name: rule.name || "unnamed",
-        permissionKey: permKey,
         message: error instanceof Error ? error.message : String(error),
       });
       return { valid: VALIDATION_RESULT.REJECTED, errors };
@@ -140,7 +137,15 @@ function mergeValidationResults(
 
   for (const result of results) {
     // Collect all errors
-    allErrors.push(...result.errors);
+    for (const error of result.errors) {
+      // Check if the error already exists in the merged errors
+      const existingError = allErrors.find(
+        (e) => e.type === error.type && e.name === error.name,
+      );
+      if (!existingError) {
+        allErrors.push(error);
+      }
+    }
 
     // Merge valid flags
     if (result.valid !== undefined) {
@@ -208,6 +213,11 @@ export function validate<
   K extends PermissionKey<H>,
   R extends PermissionRequests<H, K>,
 >(hierarchy: H, states: S, key: K, request: R): ValidationResult {
+  const permission = hierarchy.flat[key];
+  if (!permission) {
+    throw new Error(`Permission "${key}" not found in hierarchy`);
+  }
+
   const satisfier = satisfiedBy(hierarchy, key);
   const stateResults: {
     valid?: ValidationResultType;
@@ -227,13 +237,15 @@ export function validate<
 
     // Process each permission in the chain
     for (const permKey of satisfier) {
-      const permission = hierarchy.flat[permKey];
       let permissionStateEntries = originalState[permKey];
 
       // New: Handle both single state object and array of state objects
       if (permissionStateEntries === undefined) {
         // No state defined at all, use default
-        const defaultState = defaultStates[permKey];
+        const defaultState = {
+          ...defaultStates[key],
+          ...defaultStates[permKey],
+        };
         // Use type assertion to ensure compatibility with expected types
         permissionStateEntries = defaultState !== undefined
           ? [defaultState as PermissionStates<H, typeof permKey>]
