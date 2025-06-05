@@ -140,6 +140,70 @@ Quick Permission provides several built-in rules that can be composed together:
 - `denySelf()`: Denies permission when requester and target are the same
 - `ensureTime()`: Validates time-based permissions
 
+### Creating Custom Schemas and Rules
+
+Quick Permission provides utility functions to easily create custom schemas and
+rules:
+
+```typescript
+import { rule, schema } from "@diister/quick-permission";
+
+// Define types for your custom schema
+type BlogState = {
+  authorId: string;
+  published: boolean;
+};
+
+type BlogRequest = {
+  from: string;
+  action: "read" | "edit";
+};
+
+// Create a custom schema using the schema utility
+const blogSchema = () =>
+  schema<BlogState, BlogRequest>({
+    name: "blog",
+    state(obj: unknown): obj is BlogState {
+      if (typeof obj !== "object" || !obj) return false;
+      const state = obj as BlogState;
+      return typeof state.authorId === "string" &&
+        typeof state.published === "boolean";
+    },
+    request(obj: unknown): obj is BlogRequest {
+      if (typeof obj !== "object" || !obj) return false;
+      const req = obj as BlogRequest;
+      return typeof req.from === "string" &&
+        (req.action === "read" || req.action === "edit");
+    },
+    defaultState(): BlogState {
+      return { authorId: "", published: false };
+    },
+  });
+
+// Create a custom rule using the rule utility
+const allowBlogAccess = () =>
+  rule(
+    "allowBlogAccess",
+    [blogSchema()],
+    (state, request) => {
+      // Anyone can read published posts
+      if (request.action === "read" && state.published) {
+        return "granted";
+      }
+      // Only author can edit
+      if (request.action === "edit" && request.from === state.authorId) {
+        return "granted";
+      }
+      return "neutral";
+    },
+  );
+
+// Use your custom rule in a permission
+const blogPermission = permission({
+  rules: [allowBlogAccess()],
+});
+```
+
 ### Rule Composition
 
 You can compose rules using logical operators:
@@ -199,6 +263,7 @@ const hierarchy = {
 - `hierarchy(config)`: Creates a permission hierarchy
 - `permission(options)`: Creates a permission node
 - `validate(hierarchy, states, permissionKey, request)`: Validates a permission
+- `schema(options)`: Creates a custom schema with type safety
 - `rule(name, schemas, checkFn)`: Creates a custom rule
 
 ### Built-in Rules
@@ -245,10 +310,13 @@ Contributions are welcome! Please follow these guidelines:
 1. Follow TypeScript best practices and maintain type safety
 2. Add tests for new features or bug fixes
 3. Update documentation to reflect changes
-4. Run the benchmark suite to verify performance impact
+4. Run the test suite to verify your changes
 
 ```bash
-# Run benchmarks
+# Run tests
+deno test
+
+# Run benchmarks to verify performance impact
 deno bench library/test/benchmarks/validation_benchmark.ts --no-check
 ```
 

@@ -37,6 +37,7 @@
  *
  * @returns An ownership schema definition
  */
+import { schema } from "../../core/schema.ts";
 import type { Schema } from "../../types/schema.ts";
 
 /**
@@ -60,7 +61,7 @@ export type OwnerRequest = {
  * @returns A schema for ownership validation
  */
 export function owner(): Schema<OwnerState, OwnerRequest> {
-  return {
+  return schema<OwnerState, OwnerRequest>({
     name: "owner",
     request(obj: unknown): obj is OwnerRequest {
       if (typeof obj !== "object" || !obj) return false;
@@ -71,5 +72,5 @@ export function owner(): Schema<OwnerState, OwnerRequest> {
     defaultState(): OwnerState {
       return {};
     },
-  };
+  });
 }

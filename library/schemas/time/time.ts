@@ -51,6 +51,7 @@
  *
  * @returns A time schema definition
  */
+import { schema } from "../../core/schema.ts";
 import type { Schema } from "../../types/schema.ts";
 
 /**
@@ -76,7 +77,7 @@ export type TimeRequest = {
  * @returns A schema for time-based validation
  */
 export function time(): Schema<TimeState, TimeRequest> {
-  return {
+  return schema<TimeState, TimeRequest>({
     name: "time",
     state(obj: unknown): obj is TimeState {
       if (typeof obj !== "object" || !obj) return false;
@@ -96,5 +97,5 @@ export function time(): Schema<TimeState, TimeRequest> {
       // By default, no time limits are defined
       return {};
     },
-  };
+  });
 }

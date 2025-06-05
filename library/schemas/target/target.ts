@@ -40,6 +40,7 @@
  *
  * @returns A target schema definition
  */
+import { schema } from "../../core/schema.ts";
 import type { Schema } from "../../types/schema.ts";
 
 /**
@@ -65,7 +66,7 @@ export type TargetRequest = {
  * @returns A schema for target-based validation
  */
 export function target(): Schema<TargetState, TargetRequest> {
-  return {
+  return schema<TargetState, TargetRequest>({
     name: "target",
     state(obj: unknown): obj is TargetState {
       if (typeof obj !== "object" || !obj) return false;
@@ -84,5 +85,5 @@ export function target(): Schema<TargetState, TargetRequest> {
         target: [],
       };
     },
-  };
+  });
 }
