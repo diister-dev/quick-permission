@@ -60,6 +60,8 @@
 // Re-export core components
 export { hierarchy, permission, validate } from "./core/permission.ts";
 export { createDefaultStateSet, satisfiedBy } from "./core/hierarchy.ts";
+export { rule } from "./core/rule.ts";
+export { schema } from "./core/schema.ts";
 
 // Re-export operators
 export { and, merge, not, or } from "./operators/operations.ts";
@@ -87,3 +89,5 @@ export type {
   ValidationError,
   ValidationResult,
 } from "./types/common.ts";
+export type { Rule } from "./types/rule.ts";
+export type { Schema } from "./types/schema.ts";

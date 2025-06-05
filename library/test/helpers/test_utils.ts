@@ -42,9 +42,6 @@ export function printValidationResults(result: ValidationResult): void {
       console.log(`\n${bgRed(white(` Reason #${index + 1} `))}:`);
       console.log(`- ${bold("Type")}: ${cyan(reason.type)}`);
       console.log(`- ${bold("Name")}: ${blue(reason.name)}`);
-      console.log(
-        `- ${bold("Permission key")}: ${magenta(reason.permissionKey)}`,
-      );
       console.log(`- ${bold("Message")}: ${red(reason.message)}`);
       if (reason.stateIndex !== undefined) {
         console.log(

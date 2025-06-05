@@ -219,17 +219,95 @@ errors.push({
 When implementing new features, follow this typical pattern:
 
 ```typescript
+// Import the utility functions
+import { schema, rule } from "@diister/quick-permission";
+
+// Simple example: Blog post permissions
+type BlogState = {
+  authorId: string;
+  published: boolean;
+};
+
+type BlogRequest = {
+  from: string;
+  action: "read" | "edit";
+};
+
+// Create a schema using the schema utility function
+export const blogSchema = () => schema<BlogState, BlogRequest>({
+  name: "blog",
+  state(obj: unknown): obj is BlogState {
+    if (typeof obj !== "object" || !obj) return false;
+    const state = obj as BlogState;
+    return typeof state.authorId === "string" && 
+           typeof state.published === "boolean";
+  },
+  request(obj: unknown): obj is BlogRequest {
+    if (typeof obj !== "object" || !obj) return false;
+    const req = obj as BlogRequest;
+    return typeof req.from === "string" && 
+           (req.action === "read" || req.action === "edit");
+  },
+  defaultState(): BlogState {
+    return { authorId: "", published: false };
+  },
+});
+
+// Implement the rule using the rule utility function
+export const allowBlogAccess = () => rule(
+  "allowBlogAccess",
+  [blogSchema()],
+  (state, request) => {
+    // Anyone can read published posts
+    if (request.action === "read" && state.published) {
+      return "granted";
+    }
+    // Only author can edit
+    if (request.action === "edit" && request.from === state.authorId) {
+      return "granted";
+    }
+    return "neutral";
+  },
+);
+// Import the utility functions
+import { schema, rule } from "@diister/quick-permission";
+
 // Define types
 export type MyRuleState = {
   // state properties
 };
 
-// Implement the rule
-export function myRule(options?: MyRuleOptions): Rule<[Schema1, Schema2]> {
-  return {
-    name: "myRule",
-    schemas: [schema1(), schema2()],
-    check: (state, request) => {
+export type MyRuleRequest = {
+  // request properties
+};
+
+// Create a schema using the schema utility function
+export const mySchema = () => schema<MyRuleState, MyRuleRequest>({
+  name: "mySchema",
+  state(obj: unknown): obj is MyRuleState {
+    // Implementation
+    if (typeof obj !== "object" || !obj) return false;
+    // Add your validation logic here
+    return true;
+  },
+  request(obj: unknown): obj is MyRuleRequest {
+    // Implementation
+    if (typeof obj !== "object" || !obj) return false;
+    // Add your validation logic here
+    return true;
+  },
+  defaultState(): MyRuleState {
+    // Return default state
+    return { /* default values */ };
+  },
+});
+
+// Implement the rule using the rule utility function
+export function myRule(options?: MyRuleOptions): Rule<[ReturnType<typeof mySchema>]> {
+  return rule(
+    "myRule",
+    [mySchema()],
+    (state, request) => {
       // Implementation
       // Return "granted", "rejected", "neutral", or "blocked"
       if (permitCondition) {
@@ -240,9 +318,155 @@ export function myRule(options?: MyRuleOptions): Rule<[Schema1, Schema2]> {
       }
       return "neutral"; // No opinion on this request
     },
-  };
+  );
 }
 ```
+
+## Schema and Rule Creation Utilities
+
+The library provides two utility functions to simplify creating custom schemas and rules:
+
+### Schema Utility Function
+
+Use `schema<State, Request>(options)` instead of manually creating schema objects:
+
+```typescript
+import { schema } from "@diister/quick-permission";
+
+// Define your types
+type InvitationState = {
+  invitations: string[];
+};
+
+type InvitationRequest = {
+  from: string;
+  invitation: string;
+};
+
+// Create a schema using the utility function
+const invitation = () => schema<InvitationState, InvitationRequest>({
+  name: "invitation",
+  state(obj: unknown): obj is InvitationState {
+    if (typeof obj !== "object" || !obj) return false;
+    const invitations = (obj as InvitationState).invitations;
+    return Array.isArray(invitations) &&
+           invitations.every(inv => typeof inv === "string");
+  },
+  request(obj: unknown): obj is InvitationRequest {
+    if (typeof obj !== "object" || !obj) return false;
+    const req = obj as InvitationRequest;
+    return typeof req.from === "string" && typeof req.invitation === "string";
+  },
+  defaultState(): InvitationState {
+    return { invitations: [] };
+  },
+});
+
+// For simple schemas, you can omit type guards:
+const simpleSchema = () => schema<{ value: string }, { input: string }>({
+  name: "simple",
+  defaultState: () => ({ value: "" }),
+});
+```
+
+### Schema Configuration Options
+
+The `schema()` function accepts a `SchemaOptions` object with the following properties:
+
+- **name** (required): String identifier for the schema, used in error messages and deduplication
+- **state** (optional): Type guard function `(obj: unknown) => obj is State` that validates state structure
+- **request** (optional): Type guard function `(obj: unknown) => obj is Request` that validates request structure  
+- **defaultState** (optional): Function `() => State` that generates a default state when none is provided
+
+All validation functions are optional, making it easy to create simple schemas:
+
+```typescript
+// Minimal schema with just a name and default state
+const minimal = () => schema<{ count: number }, { action: string }>({
+  name: "minimal",
+  defaultState: () => ({ count: 0 }),
+});
+
+// Schema with full validation
+const complete = () => schema<UserState, UserRequest>({
+  name: "complete",
+  state(obj: unknown): obj is UserState {
+    // Comprehensive validation logic
+    return isValidUserState(obj);
+  },
+  request(obj: unknown): obj is UserRequest {
+    // Comprehensive validation logic  
+    return isValidUserRequest(obj);
+  },
+  defaultState(): UserState {
+    return { userId: null, permissions: [] };
+  },
+});
+```
+
+### Rule Utility Function
+
+Use `rule(name, schemas, checkFn)` for creating rules:
+
+```typescript
+import { rule } from "@diister/quick-permission";
+
+// Create rules with proper type inference
+const myRule = () => rule(
+  "myRule",
+  [mySchema()], // Schemas provide type safety
+  (state, request) => {
+    // state and request are properly typed based on schemas
+    // Return validation result
+    return "granted" | "rejected" | "neutral" | "blocked";
+  },
+);
+```
+
+### Benefits of Using Utilities
+
+1. **Type Safety**: Full TypeScript inference for state and request types
+2. **Consistency**: Standardized creation pattern across the codebase
+3. **Error Prevention**: Compile-time validation of schema and rule structure
+4. **Documentation**: Clear examples in function signatures
+5. **Flexibility**: Optional validation functions allow both simple and complex schemas
+
+### Best Practices for Schema and Rule Creation
+
+1. **Always export schema factory functions** (not instances):
+   ```typescript
+   // GOOD: Export a factory function
+   export const invitation = () => schema<InvitationState, InvitationRequest>({...});
+   
+   // BAD: Export an instance
+   export const invitation = schema<InvitationState, InvitationRequest>({...});
+   ```
+
+2. **Use descriptive names** that match the domain concept:
+   ```typescript
+   const userInvitation = () => schema<...>({ name: "userInvitation", ... });
+   const fileAccess = () => schema<...>({ name: "fileAccess", ... });
+   ```
+
+3. **Provide default states for rules that need context**:
+   ```typescript
+   const ownershipSchema = () => schema<OwnerState, OwnerRequest>({
+     name: "ownership", 
+     defaultState: () => ({ owner: null }), // Ensures allowOwner can function
+   });
+   ```
+
+4. **Combine multiple schemas in complex rules**:
+   ```typescript
+   const complexRule = () => rule(
+     "complexRule",
+     [invitation(), ownership(), target()], // Multiple schemas
+     (state, request) => {
+       // Access all schema data with full type safety
+       return "granted";
+     },
+   );
+   ```
 
 ## Best Practices for Testing Permissions
 
