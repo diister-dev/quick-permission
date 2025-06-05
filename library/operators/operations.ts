@@ -8,7 +8,7 @@
 import { rule } from "../core/rule.ts";
 import {
   ExtractSchemasFromRules,
-  VALIDATION_RESULT,
+  ValidationOutcome,
   ValidationResultType,
 } from "../types/common.ts";
 import type { Rule } from "../types/rule.ts";
@@ -38,17 +38,17 @@ export function merge<const R extends Rule<any>[]>(
     "merge",
     schemas,
     (state, request) => {
-      let valid: ValidationResultType = VALIDATION_RESULT.NEUTRAL;
+      let valid: ValidationResultType = ValidationOutcome.Neutral;
       for (const rule of rules) {
         const result = rule.check(state, request);
-        if (result === VALIDATION_RESULT.REJECTED) {
-          return VALIDATION_RESULT.REJECTED;
+        if (result === ValidationOutcome.Rejected) {
+          return ValidationOutcome.Rejected;
         }
-        if (result === VALIDATION_RESULT.BLOCKED) {
-          return VALIDATION_RESULT.BLOCKED;
+        if (result === ValidationOutcome.Blocked) {
+          return ValidationOutcome.Blocked;
         }
-        if (result === VALIDATION_RESULT.GRANTED) {
-          valid = VALIDATION_RESULT.GRANTED;
+        if (result === ValidationOutcome.Granted) {
+          valid = ValidationOutcome.Granted;
         }
       }
       return valid;
@@ -80,15 +80,15 @@ export function and<const R extends Rule<any>[]>(
       let allGranted = true;
       for (const rule of rules) {
         const result = rule.check(state, request);
-        if (result === VALIDATION_RESULT.REJECTED) {
-          return VALIDATION_RESULT.REJECTED;
+        if (result === ValidationOutcome.Rejected) {
+          return ValidationOutcome.Rejected;
         }
-        if (result === VALIDATION_RESULT.BLOCKED) {
-          return VALIDATION_RESULT.BLOCKED;
+        if (result === ValidationOutcome.Blocked) {
+          return ValidationOutcome.Blocked;
         }
-        if (result === VALIDATION_RESULT.NEUTRAL) allGranted = false;
+        if (result === ValidationOutcome.Neutral) allGranted = false;
       }
-      return allGranted ? VALIDATION_RESULT.GRANTED : VALIDATION_RESULT.NEUTRAL;
+      return allGranted ? ValidationOutcome.Granted : ValidationOutcome.Neutral;
     },
   );
 }
@@ -118,11 +118,11 @@ export function or<const R extends Rule<any>[]>(
     (state, request) => {
       for (const rule of rules) {
         const result = rule.check(state, request);
-        if (result === VALIDATION_RESULT.GRANTED) {
-          return VALIDATION_RESULT.GRANTED;
+        if (result === ValidationOutcome.Granted) {
+          return ValidationOutcome.Granted;
         }
       }
-      return VALIDATION_RESULT.NEUTRAL;
+      return ValidationOutcome.Neutral;
     },
   );
 }
@@ -147,14 +147,14 @@ export function not<const R extends Rule<any>>(
     inputRule.schemas,
     (state, request) => {
       const result = inputRule.check(state, request);
-      if (result === VALIDATION_RESULT.GRANTED) {
-        return VALIDATION_RESULT.REJECTED;
+      if (result === ValidationOutcome.Granted) {
+        return ValidationOutcome.Rejected;
       }
       if (
-        result === VALIDATION_RESULT.REJECTED ||
-        result === VALIDATION_RESULT.BLOCKED
-      ) return VALIDATION_RESULT.GRANTED;
-      return VALIDATION_RESULT.NEUTRAL;
+        result === ValidationOutcome.Rejected ||
+        result === ValidationOutcome.Blocked
+      ) return ValidationOutcome.Granted;
+      return ValidationOutcome.Neutral;
     },
   );
 }

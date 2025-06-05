@@ -263,27 +263,27 @@ Deno.test("Integration - time-based resource access", () => {
 });
 
 Deno.test("Integration - complex rule combinations", () => {
-  // Créons une hiérarchie simplifiée pour tester uniquement allowTarget
+  // Create a simplified hierarchy to test only allowTarget
   const simpleTargetPermissions = hierarchy({
     content: permission({
       rules: [],
       children: {
         delete: permission({
-          // Une règle simple : allowTarget
+          // A simple rule: allowTarget
           rules: [allowTarget({ wildcards: true })],
         }),
       },
     }),
   });
 
-  // Permission source pour la suppression de contenu par l'admin
+  // Permission source for admin content deletion
   const adminDeleteState = [
     {
       "content.delete": { target: ["content:*"] },
     },
   ];
 
-  // Act & Assert - Admin peut supprimer le contenu avec une règle simple
+  // Act & Assert - Admin can delete content with a simple rule
   const adminDeletesSimpleResult = validate(
     simpleTargetPermissions,
     adminDeleteState,
@@ -295,7 +295,7 @@ Deno.test("Integration - complex rule combinations", () => {
   );
   assertValidationSuccess(adminDeletesSimpleResult);
 
-  // Testez séparément la règle denySelf
+  // Test denySelf rule separately
   const selfProtectedPermissions = hierarchy({
     content: permission({
       rules: [],
@@ -307,19 +307,19 @@ Deno.test("Integration - complex rule combinations", () => {
     }),
   });
 
-  // Act & Assert - Admin ne peut pas se supprimer lui-même avec la règle denySelf
+  // Act & Assert - Admin cannot delete themselves with denySelf rule
   const adminDeletesSelfResult = validate(
     selfProtectedPermissions,
     adminDeleteState,
     "content.delete",
     {
       from: "user:admin",
-      target: "user:admin", // Cible correspond à from, déclenchant denySelf
+      target: "user:admin", // Target matches from, triggering denySelf
     },
   );
   assertValidationFailure(adminDeletesSelfResult, ["rule"], ["denySelf"]);
 
-  // Test pour combiner ensureTime avec une règle qui retourne true explicitement
+  // Test combining ensureTime with a rule that returns true explicitly
   const workStart = new Date();
   workStart.setHours(9, 0, 0, 0);
 
@@ -331,7 +331,7 @@ Deno.test("Integration - complex rule combinations", () => {
       rules: [],
       children: {
         edit: permission({
-          // Combinaison de ensureTime avec allowTarget pour avoir un true explicite
+          // Combination of ensureTime with allowTarget for explicit true
           rules: [
             ensureTime(),
             allowTarget({ wildcards: true }),
@@ -346,14 +346,14 @@ Deno.test("Integration - complex rule combinations", () => {
       "content.edit": {
         dateStart: workStart,
         dateEnd: workEnd,
-        target: ["content:*"], // Pour allowTarget
+        target: ["content:*"], // For allowTarget
       },
     },
   ];
 
-  // Act & Assert - On peut éditer pendant les heures de travail
+  // Act & Assert - Can edit during work hours
   const duringWorkHours = new Date();
-  duringWorkHours.setHours(12, 0, 0, 0); // Midi
+  duringWorkHours.setHours(12, 0, 0, 0); // Noon
 
   const editDuringWorkHoursResult = validate(
     combinedTimePermissions,

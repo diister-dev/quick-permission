@@ -158,18 +158,21 @@ Deno.test("Identity and Ownership - Issue tracker with combined patterns", () =>
           rules: [allowTarget({ wildcards: true })],
         }),
         assign: permission({
-          // Can assign issues to themselves or others based on permissions
-          // allowSelf() checks if from === target (user assigning to themselves)
+          // Can assign issues to themselves or perform assignment actions with explicit permission
+          // allowSelf() checks if from === target (user assigning to themselves - when target is user)
+          // allowTarget() checks explicit permissions for assignment actions
           rules: [or([allowSelf(), allowTarget({ wildcards: true })])],
         }),
         resolve: permission({
           // Can resolve issues they're assigned to or have explicit permission
-          // allowSelf() checks if from === target (user is assigned to the issue)
+          // allowSelf() checks if from === target (user resolving when they are the assignee)
+          // allowTarget() checks explicit permissions for resolution actions
           rules: [or([allowSelf(), allowTarget({ wildcards: true })])],
         }),
         reopen: permission({
           // Cannot reopen issues assigned to themselves (to prevent abuse)
-          // allowSelf() checks if from === target (user is the assignee)
+          // allowSelf() checks if from === target (user is the assignee being prevented)
+          // allowTarget() checks explicit permissions for reopen actions
           rules: [not(allowSelf()), allowTarget({ wildcards: true })],
         }),
         delete: permission({
@@ -226,8 +229,7 @@ Deno.test("Identity and Ownership - Issue tracker with combined patterns", () =>
     },
   );
   assertValidationSuccess(assignToSelfResult);
-
-  // Test user assigning an issue to someone else (allowTarget case)
+  // Test user performing actions on an issue (allowTarget case)
   const assignToOtherResult = validate(
     issuePermissions,
     states,

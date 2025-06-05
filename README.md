@@ -126,7 +126,7 @@ const request = {
 };
 
 const result = validate(filePermissions, states, "files.read", request);
-console.log(result.allowed); // true
+console.log(result.valid); // true
 ```
 
 ## Advanced Usage

@@ -6,7 +6,7 @@ import { rule } from "../../../core/rule.ts";
 import { assertEquals } from "jsr:@std/assert";
 import { Schema } from "../../../types/schema.ts";
 import {
-  VALIDATION_RESULT,
+  ValidationOutcome,
   ValidationResultType,
 } from "../../../types/common.ts";
 
@@ -27,22 +27,22 @@ const schema2 = {
 const grantedRule = rule(
   "grantedRule",
   [schema1],
-  () => VALIDATION_RESULT.GRANTED,
+  () => ValidationOutcome.Granted,
 );
 const rejectedRule = rule(
   "rejectedRule",
   [schema2],
-  () => VALIDATION_RESULT.REJECTED,
+  () => ValidationOutcome.Rejected,
 );
-const neutralRule = rule("neutralRule", [], () => VALIDATION_RESULT.NEUTRAL);
-const blockedRule = rule("blockedRule", [], () => VALIDATION_RESULT.BLOCKED);
+const neutralRule = rule("neutralRule", [], () => ValidationOutcome.Neutral);
+const blockedRule = rule("blockedRule", [], () => ValidationOutcome.Blocked);
 const stateCheckRule = rule(
   "stateCheckRule",
   [],
   (state: any) =>
     state?.value === true
-      ? VALIDATION_RESULT.GRANTED
-      : VALIDATION_RESULT.NEUTRAL,
+      ? ValidationOutcome.Granted
+      : ValidationOutcome.Neutral,
 );
 
 // Test state and request objects
@@ -57,7 +57,7 @@ Deno.test("merge - should return granted when any rule returns granted", () => {
   const result = mergedRule.check(state, request);
 
   // Assert
-  assertEquals(result, VALIDATION_RESULT.GRANTED);
+  assertEquals(result, ValidationOutcome.Granted);
 });
 
 Deno.test("merge - should return rejected when any rule returns rejected", () => {
@@ -68,7 +68,7 @@ Deno.test("merge - should return rejected when any rule returns rejected", () =>
   const result = mergedRule.check(state, request);
 
   // Assert
-  assertEquals(result, VALIDATION_RESULT.REJECTED);
+  assertEquals(result, ValidationOutcome.Rejected);
 });
 
 Deno.test("merge - should return blocked when any rule returns blocked", () => {
@@ -79,7 +79,7 @@ Deno.test("merge - should return blocked when any rule returns blocked", () => {
   const result = mergedRule.check(state, request);
 
   // Assert
-  assertEquals(result, VALIDATION_RESULT.BLOCKED);
+  assertEquals(result, ValidationOutcome.Blocked);
 });
 
 Deno.test("merge - should return neutral when no rule returns granted, rejected or blocked", () => {
@@ -90,14 +90,14 @@ Deno.test("merge - should return neutral when no rule returns granted, rejected 
   const result = mergedRule.check(state, request);
 
   // Assert
-  assertEquals(result, VALIDATION_RESULT.NEUTRAL);
+  assertEquals(result, ValidationOutcome.Neutral);
 });
 
 Deno.test("merge - should merge schemas correctly", () => {
   // Arrange
-  const rule1 = rule("rule1", [schema1], () => VALIDATION_RESULT.GRANTED);
-  const rule2 = rule("rule2", [schema2], () => VALIDATION_RESULT.GRANTED);
-  const rule3 = rule("rule3", [schema1], () => VALIDATION_RESULT.GRANTED); // Duplicate schema
+  const rule1 = rule("rule1", [schema1], () => ValidationOutcome.Granted);
+  const rule2 = rule("rule2", [schema2], () => ValidationOutcome.Granted);
+  const rule3 = rule("rule3", [schema1], () => ValidationOutcome.Granted); // Duplicate schema
 
   // Act
   const mergedRule = merge([rule1, rule2, rule3]);
@@ -116,7 +116,7 @@ Deno.test("and - should return granted when all rules return granted", () => {
   const result = andRule.check(state, request);
 
   // Assert
-  assertEquals(result, VALIDATION_RESULT.GRANTED);
+  assertEquals(result, ValidationOutcome.Granted);
 });
 
 Deno.test("and - should return rejected when any rule returns rejected", () => {
@@ -127,7 +127,7 @@ Deno.test("and - should return rejected when any rule returns rejected", () => {
   const result = andRule.check(state, request);
 
   // Assert
-  assertEquals(result, VALIDATION_RESULT.REJECTED);
+  assertEquals(result, ValidationOutcome.Rejected);
 });
 
 Deno.test("and - should return blocked when any rule returns blocked", () => {
@@ -138,7 +138,7 @@ Deno.test("and - should return blocked when any rule returns blocked", () => {
   const result = andRule.check(state, request);
 
   // Assert
-  assertEquals(result, VALIDATION_RESULT.BLOCKED);
+  assertEquals(result, ValidationOutcome.Blocked);
 });
 
 Deno.test("and - should return neutral when no rule returns rejected or blocked but at least one is neutral", () => {
@@ -149,7 +149,7 @@ Deno.test("and - should return neutral when no rule returns rejected or blocked 
   const result = andRule.check(state, request);
 
   // Assert
-  assertEquals(result, VALIDATION_RESULT.NEUTRAL);
+  assertEquals(result, ValidationOutcome.Neutral);
 });
 
 Deno.test("or - should return granted when any rule returns granted", () => {
@@ -160,7 +160,7 @@ Deno.test("or - should return granted when any rule returns granted", () => {
   const result = orRule.check(state, request);
 
   // Assert
-  assertEquals(result, VALIDATION_RESULT.GRANTED);
+  assertEquals(result, ValidationOutcome.Granted);
 });
 
 Deno.test("or - should return neutral when no rule returns granted", () => {
@@ -171,7 +171,7 @@ Deno.test("or - should return neutral when no rule returns granted", () => {
   const result = orRule.check(state, request);
 
   // Assert
-  assertEquals(result, VALIDATION_RESULT.NEUTRAL);
+  assertEquals(result, ValidationOutcome.Neutral);
 });
 
 Deno.test("not - should invert granted to rejected", () => {
@@ -182,7 +182,7 @@ Deno.test("not - should invert granted to rejected", () => {
   const result = notRule.check(state, request);
 
   // Assert
-  assertEquals(result, VALIDATION_RESULT.REJECTED);
+  assertEquals(result, ValidationOutcome.Rejected);
 });
 
 Deno.test("not - should invert rejected to granted", () => {
@@ -193,7 +193,7 @@ Deno.test("not - should invert rejected to granted", () => {
   const result = notRule.check(state, request);
 
   // Assert
-  assertEquals(result, VALIDATION_RESULT.GRANTED);
+  assertEquals(result, ValidationOutcome.Granted);
 });
 
 Deno.test("not - should invert blocked to granted", () => {
@@ -204,7 +204,7 @@ Deno.test("not - should invert blocked to granted", () => {
   const result = notRule.check(state, request);
 
   // Assert
-  assertEquals(result, VALIDATION_RESULT.GRANTED);
+  assertEquals(result, ValidationOutcome.Granted);
 });
 
 Deno.test("not - should leave neutral as neutral", () => {
@@ -215,7 +215,7 @@ Deno.test("not - should leave neutral as neutral", () => {
   const result = notRule.check(state, request);
 
   // Assert
-  assertEquals(result, VALIDATION_RESULT.NEUTRAL);
+  assertEquals(result, ValidationOutcome.Neutral);
 });
 
 Deno.test("operators - should work with rules that use state", () => {
@@ -228,8 +228,8 @@ Deno.test("operators - should work with rules that use state", () => {
   const result2 = stateCheckRule.check(falseState, request);
 
   // Assert
-  assertEquals(result1, VALIDATION_RESULT.GRANTED);
-  assertEquals(result2, VALIDATION_RESULT.NEUTRAL);
+  assertEquals(result1, ValidationOutcome.Granted);
+  assertEquals(result2, ValidationOutcome.Neutral);
 });
 
 Deno.test("operators - should work with complex combinations", () => {
@@ -244,6 +244,6 @@ Deno.test("operators - should work with complex combinations", () => {
   const resultNeutral = complexRule.check({ value: false } as never, request);
 
   // Assert
-  assertEquals(resultGranted, VALIDATION_RESULT.GRANTED); // stateCheckRule is granted, and not(rejectedRule) is granted
-  assertEquals(resultNeutral, VALIDATION_RESULT.NEUTRAL); // or([stateCheckRule, rejectedRule]) is neutral with value: false
+  assertEquals(resultGranted, ValidationOutcome.Granted); // stateCheckRule is granted, and not(rejectedRule) is granted
+  assertEquals(resultNeutral, ValidationOutcome.Neutral); // or([stateCheckRule, rejectedRule]) is neutral with value: false
 });

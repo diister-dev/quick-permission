@@ -14,12 +14,12 @@
  * - **ensureTime**: Validates time-based permissions
  *
  * ## Rule Return Values
- *
- * Rules can return four possible values with specific meanings:
+ * * Rules can return four possible values with specific meanings:
  * - `"granted"`: Explicitly grants permission
  * - `"rejected"`: Explicitly denies permission (short-circuits validation)
  * - `"neutral"`: No opinion (the rule doesn't apply to this request)
- * - `"blocked"`: High-priority denial that overrides other results *
+ * - `"blocked"`: High-priority denial that overrides other results
+ *
  * ## Example Usage
  *
  * ```typescript

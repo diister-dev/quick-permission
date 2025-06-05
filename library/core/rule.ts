@@ -31,10 +31,11 @@ import type {
  * When implementing the check function, the return value has specific meanings:
  * - `"granted"`: Explicitly grants permission
  * - `"rejected"`: Explicitly denies permission (short-circuits validation)
- * - `"neutral"`: No opinion (the rule doesn't apply to this request)
- * - `"blocked"`: High-priority denial that overrides other results *
+ * - `"neutral"`: No opinion (the rule doesn't apply to this request) * - `"blocked"`: High-priority denial that overrides other results
+ *
  * ## Example Usage
- * * ```typescript
+ *
+ * ```typescript
  * import { rule } from "@diister/quick-permission";
  * import { target } from "@diister/quick-permission/schemas/target";
  * import { owner } from "@diister/quick-permission/schemas/owner";

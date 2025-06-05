@@ -10,8 +10,8 @@ import {
   PermissionStates,
   PermissionStateSet,
   PermissionStateTuple,
-  VALIDATION_RESULT,
   ValidationError,
+  ValidationOutcome,
   ValidationResult,
   ValidationResultType,
 } from "../types/common.ts";
@@ -63,10 +63,10 @@ function allow(
 
   // If schema validation failed, no need to check rules
   if (errors.length > 0) {
-    return { valid: VALIDATION_RESULT.REJECTED, errors };
+    return { valid: ValidationOutcome.Rejected, errors };
   }
 
-  let resultType: ValidationResultType = VALIDATION_RESULT.NEUTRAL;
+  let resultType: ValidationResultType = ValidationOutcome.Neutral;
 
   // Validate rules
   for (const rule of rules) {
@@ -75,31 +75,31 @@ function allow(
       const ruleResult: ValidationResultType = result;
 
       // "BLOCKED" has highest priority and immediately ends validation
-      if (ruleResult === VALIDATION_RESULT.BLOCKED) {
+      if (ruleResult === ValidationOutcome.Blocked) {
         errors.push({
           type: "rule",
           name: rule.name || "unnamed",
           message: `Access blocked: ${rule.name || "unnamed"}`,
         });
-        return { valid: VALIDATION_RESULT.BLOCKED, errors };
+        return { valid: ValidationOutcome.Blocked, errors };
       }
 
       // "REJECTED" has second priority
-      if (ruleResult === VALIDATION_RESULT.REJECTED) {
+      if (ruleResult === ValidationOutcome.Rejected) {
         errors.push({
           type: "rule",
           name: rule.name || "unnamed",
           message: `Rule not satisfied: ${rule.name || "unnamed"}`,
         });
-        return { valid: VALIDATION_RESULT.REJECTED, errors };
+        return { valid: ValidationOutcome.Rejected, errors };
       }
 
       // Only update to GRANTED if we don't already have a more decisive result
       if (
-        ruleResult === VALIDATION_RESULT.GRANTED &&
-        resultType === VALIDATION_RESULT.NEUTRAL
+        ruleResult === ValidationOutcome.Granted &&
+        resultType === ValidationOutcome.Neutral
       ) {
-        resultType = VALIDATION_RESULT.GRANTED;
+        resultType = ValidationOutcome.Granted;
       }
     } catch (error) {
       const errorExist = errors.find(
@@ -110,7 +110,7 @@ function allow(
         name: rule.name || "unnamed",
         message: error instanceof Error ? error.message : String(error),
       });
-      return { valid: VALIDATION_RESULT.REJECTED, errors };
+      return { valid: ValidationOutcome.Rejected, errors };
     }
   }
 
@@ -149,42 +149,42 @@ function mergeValidationResults(
       } else {
         // "BLOCKED" has highest priority
         if (
-          result.valid === VALIDATION_RESULT.BLOCKED ||
-          merged === VALIDATION_RESULT.BLOCKED
+          result.valid === ValidationOutcome.Blocked ||
+          merged === ValidationOutcome.Blocked
         ) {
-          merged = VALIDATION_RESULT.BLOCKED;
+          merged = ValidationOutcome.Blocked;
           continue;
         }
 
         if (mode === "or") {
           // OR logic with new result types
           if (
-            merged === VALIDATION_RESULT.GRANTED ||
-            result.valid === VALIDATION_RESULT.GRANTED
+            merged === ValidationOutcome.Granted ||
+            result.valid === ValidationOutcome.Granted
           ) {
-            merged = VALIDATION_RESULT.GRANTED;
+            merged = ValidationOutcome.Granted;
           } else if (
-            merged === VALIDATION_RESULT.REJECTED &&
-            result.valid === VALIDATION_RESULT.REJECTED
+            merged === ValidationOutcome.Rejected &&
+            result.valid === ValidationOutcome.Rejected
           ) {
-            merged = VALIDATION_RESULT.REJECTED;
+            merged = ValidationOutcome.Rejected;
           } else {
             merged = result.valid; // Keep right side for NEUTRAL
           }
         } else {
           // AND logic with new result types
           if (
-            merged === VALIDATION_RESULT.NEUTRAL ||
-            result.valid === VALIDATION_RESULT.NEUTRAL
+            merged === ValidationOutcome.Neutral ||
+            result.valid === ValidationOutcome.Neutral
           ) {
-            merged = VALIDATION_RESULT.NEUTRAL;
+            merged = ValidationOutcome.Neutral;
           } else if (
-            merged === VALIDATION_RESULT.REJECTED ||
-            result.valid === VALIDATION_RESULT.REJECTED
+            merged === ValidationOutcome.Rejected ||
+            result.valid === ValidationOutcome.Rejected
           ) {
-            merged = VALIDATION_RESULT.REJECTED;
+            merged = ValidationOutcome.Rejected;
           } else {
-            merged = VALIDATION_RESULT.GRANTED; // Both are GRANTED
+            merged = ValidationOutcome.Granted; // Both are GRANTED
           }
         }
       }
@@ -250,7 +250,7 @@ export function validate<
 
       // If there's no state even after considering defaults, skip validation
       if (!permissionStateEntries) {
-        chainResults.push({ valid: VALIDATION_RESULT.NEUTRAL, errors: [] });
+        chainResults.push({ valid: ValidationOutcome.Neutral, errors: [] });
         continue;
       }
 
@@ -295,12 +295,12 @@ export function validate<
   // Merge results from different states (OR logic)
   const finalResult = mergeValidationResults(stateResults);
   // Convert ValidationResultType to boolean result
-  const isValid = finalResult.valid === VALIDATION_RESULT.GRANTED;
+  const isValid = finalResult.valid === ValidationOutcome.Granted;
 
   // Check if any of the results was REJECTED or BLOCKED
   const isExplicitlyRejected =
-    finalResult.valid === VALIDATION_RESULT.REJECTED ||
-    finalResult.valid === VALIDATION_RESULT.BLOCKED;
+    finalResult.valid === ValidationOutcome.Rejected ||
+    finalResult.valid === ValidationOutcome.Blocked;
 
   return {
     valid: isValid,

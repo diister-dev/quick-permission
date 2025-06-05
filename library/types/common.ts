@@ -7,27 +7,25 @@
 import { Rule } from "./rule.ts";
 import { Schema, SchemasRequests, SchemasStates } from "./schema.ts";
 
-type TODO = any; // TODO: Replace with actual type
-
 /**
  * Constants defining the possible outcomes of a validation operation
- * - NEUTRAL: The rule has no opinion (was undefined)
- * - GRANTED: The rule explicitly allows the permission (was true)
- * - REJECTED: The rule denies the permission for normal reasons (was false)
- * - BLOCKED: The rule denies the permission with high priority (override)
+ * - Neutral: The rule has no opinion (was undefined)
+ * - Granted: The rule explicitly allows the permission (was true)
+ * - Rejected: The rule denies the permission for normal reasons (was false)
+ * - Blocked: The rule denies the permission with high priority (override)
  */
-export const VALIDATION_RESULT = {
-  NEUTRAL: "neutral" as const,
-  GRANTED: "granted" as const,
-  REJECTED: "rejected" as const,
-  BLOCKED: "blocked" as const,
+export const ValidationOutcome = {
+  Neutral: "neutral" as const,
+  Granted: "granted" as const,
+  Rejected: "rejected" as const,
+  Blocked: "blocked" as const,
 };
 
 /**
  * The type of result returned by a rule validation
  */
 export type ValidationResultType =
-  typeof VALIDATION_RESULT[keyof typeof VALIDATION_RESULT];
+  typeof ValidationOutcome[keyof typeof ValidationOutcome];
 
 /**
  * Represents a processed permission hierarchy with additional metadata
@@ -37,8 +35,8 @@ export type ValidationResultType =
 export type PermissionHierarchy<H extends Hierarchy> = {
   type: "hierarchy";
   hierarchy: H;
-  flat: TODO;
-  keys: TODO;
+  flat: FlatHierarchy<H>;
+  keys: PermissionKey<PermissionHierarchy<H>>[];
 };
 
 /**

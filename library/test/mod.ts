@@ -3,25 +3,16 @@ import { allowTarget } from "../rules/allowTarget/allowTarget.ts";
 import { allowSelf } from "../rules/allowSelf/allowSelf.ts";
 import { denySelf } from "../rules/denySelf/denySelf.ts";
 import { hierarchy, permission, validate } from "../core/permission.ts";
-import { PermissionStateSet, ValidationResult } from "../types/common.ts";
+import { PermissionStateSet } from "../types/common.ts";
 import { and, merge, not } from "../operators/operations.ts";
 import { ensureTime } from "../rules/ensureTime/ensureTime.ts";
 import { TimeState } from "../schemas/time/time.ts";
 import { target, TargetState } from "../schemas/target/target.ts";
 import { Rule } from "../types/rule.ts";
 import {
-  bgBlue,
-  bgGreen,
-  bgRed,
-  blue,
-  bold,
-  cyan,
-  green,
-  magenta,
-  red,
-  white,
-  yellow,
-} from "https://deno.land/std/fmt/colors.ts";
+  printTestHeader,
+  printValidationResults,
+} from "./helpers/test_utils.ts";
 
 const rules = merge([allowTarget({ wildcards: true }), ensureTime()]);
 
@@ -78,54 +69,6 @@ const states: PermissionStateSet<typeof permissions>[] = [
     },
   },
 ];
-
-/**
- * Prints the validation results with colored output for better readability
- *
- * @param result The validation result to display
- */
-function printValidationResults(result: ValidationResult): void {
-  console.log(bold("\n======= Validation Results ======="));
-
-  // Show validation result
-  const validationStatus = result.valid === true
-    ? bgGreen(white(" VALID "))
-    : bgRed(white(" INVALID "));
-  console.log(`Validation status: ${validationStatus}`);
-
-  // Display reasons if any
-  if (result.reasons.length > 0) {
-    console.log(bold(red("\nValidation reasons:")));
-    result.reasons.forEach((reason, index) => {
-      console.log(`\n${bgRed(white(` Reason #${index + 1} `))}:`);
-      console.log(`- ${bold("Type")}: ${cyan(reason.type)}`);
-      console.log(`- ${bold("Name")}: ${blue(reason.name)}`);
-      console.log(
-        `- ${bold("Permission key")}: ${magenta(reason.permissionKey)}`,
-      );
-      console.log(`- ${bold("Message")}: ${red(reason.message)}`);
-      if (reason.stateIndex !== undefined) {
-        console.log(
-          `- ${bold("State index")}: ${yellow(reason.stateIndex.toString())}`,
-        );
-      }
-    });
-  } else {
-    console.log(`\n${bgGreen(white(" No validation issues "))} ✓`);
-  }
-
-  console.log(bold("==================================\n"));
-}
-
-/**
- * Prints a test header with the test title
- *
- * @param testNumber The number of the test
- * @param description Description of the test case
- */
-function printTestHeader(testNumber: number, description: string): void {
-  console.log(bgBlue(white(` Test #${testNumber} `)) + " " + bold(description));
-}
 
 // Success case
 printTestHeader(

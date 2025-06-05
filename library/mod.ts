@@ -51,7 +51,7 @@
  *   target: "file:public/document.txt",
  * });
  *
- * console.log(result.allowed); // true
+ * console.log(result.valid); // true
  * ```
  *
  * @module
@@ -87,6 +87,7 @@ export type {
   PermissionRequests,
   PermissionStateSet,
   ValidationError,
+  ValidationOutcome,
   ValidationResult,
 } from "./types/common.ts";
 export type { Rule } from "./types/rule.ts";

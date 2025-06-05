@@ -10,7 +10,7 @@ import {
   assertValidationSuccess,
 } from "../../helpers/test_utils.ts";
 import {
-  VALIDATION_RESULT,
+  ValidationOutcome,
   ValidationResultType,
 } from "../../../types/common.ts";
 
@@ -48,25 +48,25 @@ const errorSchema = {
 const allowRule = {
   name: "allowRule",
   schemas: [validSchema],
-  check: () => VALIDATION_RESULT.GRANTED,
+  check: () => ValidationOutcome.Granted,
 };
 
 const denyRule = {
   name: "denyRule",
   schemas: [validSchema],
-  check: () => VALIDATION_RESULT.REJECTED,
+  check: () => ValidationOutcome.Rejected,
 };
 
 const neutralRule = {
   name: "neutralRule",
   schemas: [validSchema],
-  check: () => VALIDATION_RESULT.NEUTRAL,
+  check: () => ValidationOutcome.Neutral,
 };
 
 const blockedRule = {
   name: "blockedRule",
   schemas: [validSchema],
-  check: () => VALIDATION_RESULT.BLOCKED,
+  check: () => ValidationOutcome.Blocked,
 };
 
 const errorRule = {
@@ -367,12 +367,12 @@ Deno.test("validate - should consider multiple states with OR logic", () => {
     schemas: [],
     check: (state: any) =>
       state.state === "allowing"
-        ? VALIDATION_RESULT.GRANTED
-        : VALIDATION_RESULT.REJECTED,
+        ? ValidationOutcome.Granted
+        : ValidationOutcome.Rejected,
   };
 
   // Override the rules for the test
-  testPermissions.flat.resource.rules = [stateSpecificRule];
+  testPermissions.flat.resource.rules = [stateSpecificRule as never];
 
   // Act
   const result = validate(testPermissions, states as any, "resource", {

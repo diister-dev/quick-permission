@@ -5,7 +5,7 @@
  * components that determine if a permission is granted based on state and request data.
  */
 import { Schema, SchemasRequests, SchemasStates } from "./schema.ts";
-import { VALIDATION_RESULT, ValidationResultType } from "../types/common.ts";
+import { ValidationOutcome, ValidationResultType } from "../types/common.ts";
 
 /**
  * Represents a permission rule that validates requests against state
@@ -16,11 +16,10 @@ import { VALIDATION_RESULT, ValidationResultType } from "../types/common.ts";
  * - A check function that performs the validation logic
  *
  * The check function can return:
- * - `GRANTED`: Permission is explicitly granted
- * - `REJECTED`: Permission is denied (normal deny)
- * - `BLOCKED`: Permission is denied with high priority (e.g., ban, override)
- * - `NEUTRAL`: No opinion (neutral)
-
+ * - `"granted"`: Permission is explicitly granted
+ * - `"rejected"`: Permission is denied (normal deny)
+ * - `"blocked"`: Permission is denied with high priority (e.g., ban, override)
+ * - `"neutral"`: No opinion (neutral)
  *
  * @template S The array of schemas used by this rule
  */
