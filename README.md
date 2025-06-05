@@ -61,9 +61,10 @@ A permission system in Quick Permission consists of three key components:
 
 Rules evaluate permission requests against permission states and can return:
 
-- `true`: Explicitly grants permission
-- `false`: Explicitly denies permission (short-circuits validation)
-- `undefined`: No opinion (neutral)
+- `"granted"`: Explicitly grants permission
+- `"rejected"`: Explicitly denies permission (short-circuits validation)
+- `"neutral"`: No opinion (the rule doesn't apply to this request)
+- `"blocked"`: High-priority denial that overrides other results
 
 The validation logic combines these results to determine if access is granted.
 
@@ -129,6 +130,53 @@ console.log(result.allowed); // true
 ```
 
 ## Advanced Usage
+
+### Rule Return Values
+
+Quick Permission uses a four-value system for rule results to provide
+fine-grained control over permission logic:
+
+| Return Value | Meaning                           | Behavior                                           |
+| ------------ | --------------------------------- | -------------------------------------------------- |
+| `"granted"`  | Permission explicitly allowed     | Grants access if no other rules deny               |
+| `"rejected"` | Permission denied (normal)        | Immediately denies access (short-circuits)         |
+| `"neutral"`  | No opinion                        | Rule doesn't apply to this request                 |
+| `"blocked"`  | Permission denied (high priority) | Immediately denies access, overrides other results |
+
+#### Validation Logic Flow
+
+1. **Short-circuit on denial**: If any rule returns `"rejected"` or `"blocked"`,
+   validation stops and denies permission
+2. **Explicit grant required**: At least one rule must return `"granted"` for
+   permission to be allowed
+3. **Default deny**: If all rules return `"neutral"`, permission is denied
+4. **Priority handling**: `"blocked"` has highest priority and overrides all
+   other results
+
+#### Example Use Cases
+
+```typescript
+// Standard permission check
+const allowOwner = () =>
+  rule("allowOwner", [owner()], (state, request) => {
+    if (request.from === request.owner) return "granted";
+    return "neutral"; // Let other rules decide
+  });
+
+// Security enforcement
+const denyBannedUsers = () =>
+  rule("denyBannedUsers", [user()], (state, request) => {
+    if (state.bannedUsers.includes(request.from)) return "blocked"; // High-priority denial
+    return "neutral";
+  });
+
+// Business logic
+const requireApproval = () =>
+  rule("requireApproval", [approval()], (state, request) => {
+    if (state.requiresApproval && !state.approved) return "rejected";
+    return "neutral";
+  });
+```
 
 ### Built-in Rules
 
@@ -284,8 +332,8 @@ ensureTime(); // Validates time constraints
 ### Logical Operators
 
 ```typescript
-and([rule1, rule2]); // All rules must return true
-or([rule1, rule2]); // At least one rule must return true
+and([rule1, rule2]); // All rules must grant permission
+or([rule1, rule2]); // At least one rule must grant permission
 not(rule); // Inverts the result of a rule
 ```
 

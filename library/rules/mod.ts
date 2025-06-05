@@ -3,7 +3,7 @@
  *
  * This module exports built-in permission rule functions that can be used to validate
  * permission requests against permission states. Each rule evaluates a specific aspect
- * of permission and returns true, false, or undefined.
+ * of permission and returns one of four possible validation result values.
  *
  * ## Available Rules
  *
@@ -15,11 +15,11 @@
  *
  * ## Rule Return Values
  *
- * Rules can return three possible values with specific meanings:
- * - `true`: Explicitly grants permission
- * - `false`: Explicitly denies permission (short-circuit)
- * - `undefined`: No opinion (neutral)
- *
+ * Rules can return four possible values with specific meanings:
+ * - `"granted"`: Explicitly grants permission
+ * - `"rejected"`: Explicitly denies permission (short-circuits validation)
+ * - `"neutral"`: No opinion (the rule doesn't apply to this request)
+ * - `"blocked"`: High-priority denial that overrides other results *
  * ## Example Usage
  *
  * ```typescript

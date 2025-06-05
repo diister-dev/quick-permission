@@ -20,7 +20,7 @@ import { VALIDATION_RESULT, ValidationResultType } from "../types/common.ts";
  * - `REJECTED`: Permission is denied (normal deny)
  * - `BLOCKED`: Permission is denied with high priority (e.g., ban, override)
  * - `NEUTRAL`: No opinion (neutral)
- * - For backward compatibility: `true` (GRANTED), `false` (REJECTED), `undefined` (NEUTRAL)
+
  *
  * @template S The array of schemas used by this rule
  */
@@ -31,10 +31,7 @@ export type Rule<
   name: string;
   /** Schemas that define the structure of state and request */
   schemas: S;
-  /**
-   * Function that validates a request against state
-   * Returns a ValidationResultType or a legacy boolean/undefined value
-   */
+  /** Function that validates a request against state */
   check: (
     state: SchemasStates<S>,
     request: SchemasRequests<S>,

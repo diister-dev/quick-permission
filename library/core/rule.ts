@@ -7,9 +7,10 @@
  *
  * Rules in Quick Permission:
  * - Evaluate request data against permission state
- * - Return a tri-state result (true, false, undefined)
+ * - Return one of four validation result types ("granted", "rejected", "neutral", "blocked")
  * - Are composable using logical operators
  * - Use schemas to enforce type safety
+ * - Return one of four validation result types
  */
 import { ValidationResultType } from "../types/common.ts";
 import type { Rule } from "../types/rule.ts";
@@ -25,17 +26,15 @@ import type {
  * This function makes it easy to create properly typed rules while ensuring that
  * the check function receives correctly typed state and request parameters based
  * on the schemas provided.
- *
- * ## Rule Return Values
+ * * ## Rule Return Values
  *
  * When implementing the check function, the return value has specific meanings:
- * - `true`: Explicitly grants permission
- * - `false`: Explicitly denies permission (short-circuits validation)
- * - `undefined`: No opinion (neutral)
- *
+ * - `"granted"`: Explicitly grants permission
+ * - `"rejected"`: Explicitly denies permission (short-circuits validation)
+ * - `"neutral"`: No opinion (the rule doesn't apply to this request)
+ * - `"blocked"`: High-priority denial that overrides other results *
  * ## Example Usage
- *
- * ```typescript
+ * * ```typescript
  * import { rule } from "@diister/quick-permission";
  * import { target } from "@diister/quick-permission/schemas/target";
  * import { owner } from "@diister/quick-permission/schemas/owner";
@@ -47,14 +46,14 @@ import type {
  *   (state, request) => {
  *     // Both state and request are properly typed based on the schemas
  *     if (request.from === request.owner && state.target.includes(request.target)) {
- *       return true; // Explicitly allow
+ *       return "granted"; // Explicitly allow
  *     }
  *
  *     if (isBlacklisted(request.from)) {
- *       return false; // Explicitly deny
+ *       return "rejected"; // Explicitly deny
  *     }
  *
- *     return undefined; // No opinion
+ *     return "neutral"; // No opinion
  *   }
  * );
  * ```

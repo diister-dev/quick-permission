@@ -72,12 +72,7 @@ function allow(
   for (const rule of rules) {
     try {
       const result = rule.check(state, request);
-      // For backward compatibility: convert boolean results to ValidationResultType
-      let ruleResult: ValidationResultType;
-      if (result === false) ruleResult = VALIDATION_RESULT.REJECTED;
-      else if (result === true) ruleResult = VALIDATION_RESULT.GRANTED;
-      else if (result === undefined) ruleResult = VALIDATION_RESULT.NEUTRAL;
-      else ruleResult = result; // Already using the new enum type
+      const ruleResult: ValidationResultType = result;
 
       // "BLOCKED" has highest priority and immediately ends validation
       if (ruleResult === VALIDATION_RESULT.BLOCKED) {
@@ -238,15 +233,13 @@ export function validate<
     // Process each permission in the chain
     for (const permKey of satisfier) {
       let permissionStateEntries = originalState[permKey];
-
-      // New: Handle both single state object and array of state objects
       if (permissionStateEntries === undefined) {
         // No state defined at all, use default
         const defaultState = {
           ...defaultStates[key],
           ...defaultStates[permKey],
         };
-        // Use type assertion to ensure compatibility with expected types
+        // Use type assertion for type safety
         permissionStateEntries = defaultState !== undefined
           ? [defaultState as PermissionStates<H, typeof permKey>]
           : undefined;
@@ -301,8 +294,7 @@ export function validate<
 
   // Merge results from different states (OR logic)
   const finalResult = mergeValidationResults(stateResults);
-
-  // Convert ValidationResultType to boolean for compatibility
+  // Convert ValidationResultType to boolean result
   const isValid = finalResult.valid === VALIDATION_RESULT.GRANTED;
 
   // Check if any of the results was REJECTED or BLOCKED

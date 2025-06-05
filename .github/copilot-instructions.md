@@ -149,9 +149,9 @@ Important implementation details:
 Rules can return four possible string values with specific meanings:
 
 - `"granted"`: Explicitly grants permission
-- `"rejected"`: Explicitly denies permission
-- `"neutral"`: No opinion (neutral)
-- `"blocked"`: High-priority denial (overrides other results)
+- `"rejected"`: Explicitly denies permission (short-circuits validation)
+- `"neutral"`: No opinion (the rule doesn't apply to this request)
+- `"blocked"`: High-priority denial that overrides other results
 
 The validation logic works as follows:
 
@@ -159,6 +159,7 @@ The validation logic works as follows:
   (short-circuit)
 - A rule must explicitly return `"granted"` to grant permission
 - If all rules return `"neutral"`, permission is denied by default
+- `"blocked"` has the highest priority and will override any other result
 - You can combine rules with operators like `and`, `or`, and `not` to create
   complex logic
 
@@ -166,9 +167,13 @@ The validation logic works as follows:
 // Return "granted" explicitly to allow
 check: ((state, request) => {
   if (conditionMet) return "granted";
+  if (criticalViolation) return "blocked"; // High-priority denial
+  if (normalViolation) return "rejected"; // Standard denial
   return "neutral"; // No opinion
 });
 ```
+
+
 
 ## Code Style Guidelines
 
