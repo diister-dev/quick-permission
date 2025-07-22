@@ -143,15 +143,15 @@ console.log(result);
 const hierarchy = {
   user: {
     create: permission([ruleAlwaysAccept]),
-    read: [permission([ruleAlwaysAccept]), {
+    read: {
       profile: permission([ruleAlwaysAccept]),
       settings: permission([ruleAlwaysAccept]),
       notifications: permission([ruleAlwaysAccept]),
-    }],
+    },
     update: permission([ruleAlwaysAccept]),
     delete: permission([ruleAlwaysAccept]),
   },
-};
+} satisfies Hierarchy;
 
 type Hierarchy = {
   [key: string]: Permission<any> | Hierarchy;
@@ -169,3 +169,4 @@ type HierarchyElements<T, K extends string = ""> = T extends Hierarchy ?
   : never;
 
 type A = HierarchyElements<typeof hierarchy>;
+type Paths = A["key"];
