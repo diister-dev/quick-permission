@@ -1,8 +1,9 @@
 {
-  "version": "4",
+  "version": "5",
   "specifiers": {
     "jsr:@std/assert@*": "1.0.10",
-    "jsr:@std/internal@^1.0.5": "1.0.5"
+    "jsr:@std/internal@^1.0.5": "1.0.5",
+    "npm:mingo@*": "6.7.1"
   },
   "jsr": {
     "@std/assert@1.0.10": {
@@ -13,6 +14,11 @@
     },
     "@std/internal@1.0.5": {
       "integrity": "54a546004f769c1ac9e025abd15a76b6671ddc9687e2313b67376125650dc7ba"
+    }
+  },
+  "npm": {
+    "mingo@6.7.1": {
+      "integrity": "sha512-LrFaAdqcut7fBkYKMOE3MTm0YpjAdLpyuakRav9h/WukKF/Ze+K7tpWBTHV1+lhxKUggMm/2muhsP0GLpfLKbg=="
     }
   },
   "redirects": {
