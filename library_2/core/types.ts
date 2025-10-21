@@ -13,16 +13,16 @@ export type Subject = {
 /**
  * A permission defines access rules without context (leaf node)
  */
-export type Permission<C = undefined, TRules extends readonly OutputRule<any, any>[] = readonly OutputRule<any, any>[]> = {
+export type Permission<C = undefined, TRules extends readonly OutputRule<any, any>[] = readonly []> = {
   type: "permission";
   fetchTarget?: (id: C) => Promise<any>;
-  rules?: TRules;
+  rules: TRules;
 }
 
 /**
  * An intermediate permission can expand into multiple other permissions
  */
-export type IntermediatePermission<C = undefined, TRules extends readonly OutputRule<any, any>[] = readonly OutputRule<any, any>[]> = {
+export type IntermediatePermission<C = undefined, TRules extends readonly OutputRule<any, any>[] = readonly []> = {
   type: "intermediate";
   provide: (ctx: { subject: Subject, target: C }) => Array<{
     subject: Subject,
@@ -30,13 +30,15 @@ export type IntermediatePermission<C = undefined, TRules extends readonly Output
     target?: any
   }>;
   fetchTarget?: (id: C) => Promise<any>;
-  rules?: TRules;
+  rules: TRules;
 }
 
 /**
  * Either a permission or intermediate permission
  */
-export type PermissionDefinition<C = undefined> = Permission<C> | IntermediatePermission<C>;
+export type PermissionDefinition<C = undefined, TRules extends readonly OutputRule<any, any>[] = any> =
+  | Permission<C, TRules>
+  | IntermediatePermission<C, TRules>;
 
 /**
  * Extract the context type from a permission definition
@@ -47,7 +49,7 @@ export type ExtractContext<P> = P extends PermissionDefinition<infer C> ? C : ne
  * Schema of all permissions in the system
  */
 export type PermissionSchemas = {
-  [key: string]: PermissionDefinition<any>;
+  [key: string]: PermissionDefinition<any, any>;
 }
 
 /**
@@ -101,7 +103,8 @@ export type OutputRule<
   output: (params: {
     state: PermissionWithMetadata & Partial<TState>;
     ctx: any;
-    resource?: any;
+    target?: any;
+    fetchTarget?: (id: any) => Promise<any>;  // Cached fetch function
     currentOutput: any;
   }) => TOutput | Promise<TOutput>;
   defaultState?: () => Partial<TState>;
@@ -167,12 +170,12 @@ export type ExtractPermissionOutput<P> =
   P extends Permission<any, infer TRules>
     ? TRules extends readonly OutputRule<any, any>[]
       ? MergeRuleOutputs<TRules>
-      : never
+      : {}
     : P extends IntermediatePermission<any, infer TRules>
       ? TRules extends readonly OutputRule<any, any>[]
         ? MergeRuleOutputs<TRules>
-        : never
-      : never;
+        : {}
+      : {};
 
 /**
  * Result of a permission check

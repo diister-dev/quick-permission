@@ -66,6 +66,7 @@ function getArticle(id: ArticleId): Promise<Article | undefined> {
 
 const permissionsSchemas = {
   "article.read": permission(getArticle, [FilterRule()] as const),
+  "article.create": permission(),
 };
 
 // ============================================================================

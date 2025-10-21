@@ -108,6 +108,7 @@ export function createPermissionSystem<
     key: string,
     target: any,
     context: any,
+    resourceCache?: Map<string, any>,
   ): Promise<PermissionResult> {
     // 1. Collect permissions from all providers
     const providerResults = await Promise.all(
@@ -164,24 +165,42 @@ export function createPermissionSystem<
       return { ok: false };
     }
 
-    // 6. Fetch resource once if needed
+    // 6. Get resource cache (from parameter or create local)
     const permission = schemas[key];
-    let resource = undefined;
+    const cache = resourceCache || new Map<string, any>();
 
-    if (permission.fetchTarget && target !== undefined) {
-      try {
-        resource = await permission.fetchTarget(target);
-      } catch (_error) {
-        // If fetch fails, permission denied
-        return { ok: false };
+    // Create cached fetchTarget function
+    const cachedFetchTarget = async (id: any): Promise<any> => {
+      if (!permission.fetchTarget) {
+        return undefined;
       }
-    }
+
+      // Cache key is just the target (not key+target) since same resource can be used by multiple permissions
+      const cacheKey = JSON.stringify(id);
+
+      // Check cache first
+      if (cache.has(cacheKey)) {
+        // console.log(`  [Cache HIT: ${cacheKey}]`);
+        return cache.get(cacheKey);
+      }
+
+      // Fetch and cache
+      try {
+        const resource = await permission.fetchTarget(id);
+        cache.set(cacheKey, resource);
+        return resource;
+      } catch (_error) {
+        // Cache the error as undefined
+        cache.set(cacheKey, undefined);
+        return undefined;
+      }
+    };
 
     // 7. Accumulate outputs from all valid permissions
     let accumulatedOutput: any = {};
 
     for (const perm of validPermissions) {
-      if (permission.rules) {
+      if (permission.rules && permission.rules.length > 0) {
         for (const outputRule of permission.rules) {
           const ruleContext = {
             ...context,
@@ -193,7 +212,8 @@ export function createPermissionSystem<
           const ruleOutput = await outputRule.output({
             state: perm,
             ctx: ruleContext,
-            resource,
+            target,
+            fetchTarget: cachedFetchTarget,  // ✨ Pass cached fetch
             currentOutput: accumulatedOutput,
           });
 
@@ -212,6 +232,9 @@ export function createPermissionSystem<
 
   /**
    * Check if subject can perform action
+   *
+   * @example
+   * permSystem.can(user, "article.read", "article:1")
    */
   async function can<K extends keyof PS>(
     subject: Subject,
@@ -222,11 +245,14 @@ export function createPermissionSystem<
         : [C]
       : []
   ): Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>> {
+    const target = args[0];
+    const mergedContext = await defaultContext();
+
     return checkPermission(
       subject,
       key as string,
-      args[0],
-      await defaultContext(),
+      target,
+      mergedContext,
     ) as Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
   }
 
@@ -254,8 +280,48 @@ export function createPermissionSystem<
     };
   }
 
+  /**
+   * Create a permission checker with a specific context and shared cache
+   *
+   * @example
+   * const checker = permSystem.context({ subject: user, checkDate: new Date() });
+   * await checker.can("article.read", "article:1");  // Fetch
+   * await checker.can("article.update", "article:1"); // Cache HIT (same cache across calls)
+   */
+  function context(ctx: Partial<MergeRequestContexts<TRules>> & { subject: Subject; [key: string]: any }) {
+    // Create a shared cache for this context
+    const cache = new Map<string, any>();
+
+    return {
+      async can<K extends keyof PS>(
+        key: K,
+        ...args: PS[K] extends Permission<infer C, any> | IntermediatePermission<infer C, any>
+          ? C extends undefined
+            ? []
+            : [C]
+          : []
+      ): Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>> {
+        const target = args[0];
+        const mergedContext = {
+          ...await defaultContext(),
+          ...ctx,
+        };
+
+        // Use the shared cache from this context
+        return checkPermission(
+          ctx.subject,
+          key as string,
+          target,
+          mergedContext,
+          cache  // Pass the shared cache
+        ) as Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
+      }
+    };
+  }
+
   return {
     can,
     withContext,
+    context,
   };
 }

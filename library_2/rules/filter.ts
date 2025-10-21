@@ -33,7 +33,7 @@ export function FilterRule(): OutputRule<
 > {
   return {
     name: "filter",
-    output: async ({ state, resource, currentOutput }) => {
+    output: async ({ state, target, fetchTarget, currentOutput }) => {
       const filterSpec = state.filter;
 
       if (!filterSpec) {
@@ -45,13 +45,17 @@ export function FilterRule(): OutputRule<
       const existingFilter = currentOutput?.filter;
       const mergedFilter = mergeFilters(existingFilter, filterSpec);
 
-      // Apply merged filter to resource
-      if (resource !== undefined && resource !== null) {
-        const filtered = applyFilter(resource, mergedFilter);
-        return {
-          filter: mergedFilter,  // For inspection/debugging
-          data: filtered
-        };
+      // ✨ Fetch resource using cached fetchTarget
+      if (fetchTarget && target !== undefined) {
+        const resource = await fetchTarget(target);
+
+        if (resource !== undefined && resource !== null) {
+          const filtered = applyFilter(resource, mergedFilter);
+          return {
+            filter: mergedFilter,  // For inspection/debugging
+            data: filtered
+          };
+        }
       }
 
       // No resource to filter, just return the filter spec

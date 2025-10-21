@@ -35,7 +35,7 @@ export function permission<C = undefined, TRules extends readonly OutputRule<any
   return {
     type: "permission",
     fetchTarget,
-    rules,
+    rules: (rules ?? []) as TRules,
   } as Permission<C, TRules>;
 }
 
@@ -98,6 +98,6 @@ export function intermediate<C = undefined, TRules extends readonly OutputRule<a
     type: "intermediate",
     provide,
     fetchTarget,
-    rules,
+    rules: (rules ?? []) as TRules,
   } as IntermediatePermission<C, TRules>;
 }

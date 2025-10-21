@@ -211,7 +211,7 @@ if (canCreate.ok) {
   // User can create articles
 }
 
-// Permission avec context
+// Permission avec context (target)
 const canRead = await permSystem.can(user, "article.read", "article:1");
 if (canRead.ok) {
   // User can read article:1
@@ -219,13 +219,17 @@ if (canRead.ok) {
   console.log("Filtered data:", canRead.output?.data);
 }
 
-// Permission avec context custom
-const checker = permSystem.withContext({
+// Créer un checker avec contexte partagé + cache
+const checker = permSystem.context({
+  subject: user,
   checkDate: new Date("2024-01-01"),
   ips: ["192.168.1.1"],
 });
 
-const result = await checker.can(user, "article.read", "article:1");
+// Tous les appels à checker.can() partagent le même cache !
+const r1 = await checker.can("article.read", "article:1");  // FETCH
+const r2 = await checker.can("article.update", "article:1"); // CACHE HIT
+const r3 = await checker.can("article.delete", "article:1"); // CACHE HIT
 ```
 
 ---
@@ -356,6 +360,50 @@ const permSystem = createPermissionSystem({
 // Only works if article.public === true OR article.author === user.id
 ```
 
+### Exemple 4 : Resource Caching avec `context()`
+
+```typescript
+import { createPermissionSystem, permission, FilterRule } from "./library_2/mod.ts";
+
+const schemas = {
+  "article.read": permission(getArticle, [FilterRule()] as const),
+  "article.update": permission(getArticle),
+  "article.delete": permission(getArticle),
+};
+
+const permSystem = createPermissionSystem({
+  schemas,
+  sources: [ownerProvider(["article.read", "article.update", "article.delete"], "article:*")],
+});
+
+// SANS context() : chaque permission déclenche un fetch
+await permSystem.can(user, "article.read", "article:1");   // FETCH #1
+await permSystem.can(user, "article.update", "article:1"); // FETCH #2
+await permSystem.can(user, "article.delete", "article:1"); // FETCH #3
+
+// AVEC context() : le cache est partagé entre tous les can()
+const checker = permSystem.context({ subject: user });
+await checker.can("article.read", "article:1");   // FETCH #1
+await checker.can("article.update", "article:1"); // CACHE HIT ✨
+await checker.can("article.delete", "article:1"); // CACHE HIT ✨
+
+// Le cache fonctionne aussi dans les fonctions imbriquées
+async function checkAllPermissions(checker, articleId: string) {
+  const canRead = await checker.can("article.read", articleId);   // CACHE HIT
+  const canUpdate = await checker.can("article.update", articleId); // CACHE HIT
+  return { canRead: canRead.ok, canUpdate: canUpdate.ok };
+}
+
+const perms = await checkAllPermissions(checker, "article:1");
+// ↑ Pas de nouveau fetch ! Tout est en cache
+```
+
+**Avantages de `context()` :**
+- ✅ Cache partagé entre tous les `can()` du même checker
+- ✅ Contexte custom (dates, IPs, metadata) dans tous les appels
+- ✅ API élégante : `checker.can(key, target)` au lieu de `can(subject, key, target)`
+- ✅ Pas besoin de callbacks/closures (contrairement à AsyncContext)
+
 ---
 
 ## 🏗️ Architecture
@@ -363,24 +411,26 @@ const permSystem = createPermissionSystem({
 ### Flow de Validation
 
 ```
-1. permSystem.can(subject, key, target)
+1. permSystem.can(subject, key, target) ou checker.can(key, target)
    ↓
 2. Appel de tous les providers → [permissions]
    ↓
-3. Résolution des intermediates (récursif) → [permissions résolues]
+3. Résolution des intermediates (récursif, max depth: 10) → [permissions résolues]
    ↓
 4. Filter par key + target matching → [permissions matchées]
    ↓
 5. Application des global rules (Time, IP, With) → [permissions valides]
    ↓
-6. Fetch de la resource (une seule fois)
+6. Fetch de la resource (avec cache si context()) ✨
    ↓
 7. Application des output rules (FilterRule) → outputs
    ↓
-8. Merge des outputs (union) → output final
+8. Merge des outputs (union strategy) → output final
    ↓
 9. Return { ok: true, output }
 ```
+
+**Note sur le cache** : Sans `context()`, chaque `can()` crée son propre cache local. Avec `context()`, tous les `can()` du même checker partagent le même cache Map.
 
 ### Composants
 
@@ -483,9 +533,10 @@ const permSystem = createPermissionSystem({
 
 ### Optimisations Intégrées
 
-1. **Resource Fetching** : La resource est fetchée **une seule fois** même si plusieurs permissions matchent
-2. **Short-Circuit** : Les global rules arrêtent la validation dès qu'une échoue
-3. **Lazy Evaluation** : Les intermediate ne sont résolus que si nécessaire
+1. **Resource Caching** : Avec `context()`, le cache est partagé entre tous les appels `can()`
+2. **Resource Fetching** : La resource est fetchée **une seule fois** par permission check
+3. **Short-Circuit** : Les global rules arrêtent la validation dès qu'une échoue
+4. **Lazy Evaluation** : Les intermediate ne sont résolus que si nécessaire
 
 ### Tips pour Meilleures Performances
 
@@ -557,6 +608,45 @@ intermediate(
   getArticle
 )
 ```
+
+### Permission System Methods
+
+#### `permSystem.can<K>(subject, key, ...target?)`
+
+Vérifie une permission pour un sujet donné.
+
+```typescript
+// Sans target
+await permSystem.can(user, "article.create")
+
+// Avec target
+await permSystem.can(user, "article.read", "article:1")
+
+// Retour
+type PermissionResult<TOutput> = {
+  ok: boolean;
+  output?: TOutput;  // Type inféré depuis les rules
+}
+```
+
+#### `permSystem.context(ctx)`
+
+Crée un checker avec contexte partagé et cache.
+
+```typescript
+const checker = permSystem.context({
+  subject: user,           // Requis
+  checkDate: new Date(),   // Optionnel (pour TimeRule)
+  ips: ["192.168.1.1"],   // Optionnel (pour IpRule)
+  // ... autres propriétés custom
+});
+
+// Tous les can() du checker partagent le même cache
+await checker.can("article.read", "article:1");   // FETCH
+await checker.can("article.update", "article:1"); // CACHE HIT
+```
+
+**Retour** : `{ can<K>(key, ...target?) => Promise<PermissionResult<...>> }`
 
 ### Built-in Providers
 
