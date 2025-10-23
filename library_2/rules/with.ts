@@ -15,28 +15,38 @@ export function WithRule(): PermissionRule<
 > {
   return {
     name: "with",
-    check: async (state, ctx, permission) => {
-      if (!state.with) return true; // No 'with' condition, allow
+    check: async (state, request, ctx) => {
+      if (!state.with) return {
+        ok: true
+      }; // No 'with' condition, allow
 
       // If we have a target and the permission has a resolver, fetch the resource
-      if (ctx.target !== undefined && permission.fetchTarget) {
+      if (request.target !== undefined && ctx.permission.fetchTarget) {
         try {
-          const resource = await permission.fetchTarget(ctx.target);
+          const resource = await ctx.permission.fetchTarget(request.target);
 
           // Check if resource matches all constraints in 'with'
           for (const [key, value] of Object.entries(state.with)) {
             if (resource?.[key] !== value) {
-              return false;
+              return {
+                ok: false,
+                reason: `Resource constraint '${key}' does not match`,
+              }
             }
           }
         } catch (_error) {
           // If fetchTarget fails, consider the permission denied
-          return false;
+          return {
+            ok: false,
+            reason: "Failed to fetch target resource",
+          };
         }
       }
 
-      return true;
+      return {
+        ok: true
+      };
     },
-    default: () => ({}),
+    default: () => ({})
   };
 }

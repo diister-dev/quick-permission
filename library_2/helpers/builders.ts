@@ -1,4 +1,4 @@
-import type { Permission, IntermediatePermission, Subject, OutputRule } from "../core/types.ts";
+import type { Permission, IntermediatePermission, Subject, PermissionRule } from "../core/types.ts";
 
 /**
  * Creates a permission (leaf node in permission tree)
@@ -14,7 +14,7 @@ import type { Permission, IntermediatePermission, Subject, OutputRule } from "..
  */
 
 // Overload 1: No arguments
-export function permission(): Permission<undefined, readonly []>;
+export function permission(): Permission<undefined, []>;
 
 // Overload 2: Only fetchTarget
 export function permission<C>(
@@ -22,13 +22,13 @@ export function permission<C>(
 ): Permission<C, readonly []>;
 
 // Overload 3: fetchTarget + rules
-export function permission<C, TRules extends readonly OutputRule<any, any>[]>(
+export function permission<C, TRules extends readonly PermissionRule<any, any, any>[]>(
   fetchTarget: (id: C) => Promise<any>,
   rules: TRules
 ): Permission<C, TRules>;
 
 // Implementation
-export function permission<C = undefined, TRules extends readonly OutputRule<any, any>[] = readonly []>(
+export function permission<C = undefined, TRules extends readonly PermissionRule<any, any, any>[] = readonly []>(
   fetchTarget?: (id: C) => Promise<any>,
   rules?: TRules
 ): Permission<C, TRules> {
@@ -61,7 +61,7 @@ export function intermediate<C>(
     key: string,
     target?: any
   }>
-): IntermediatePermission<C, readonly []>;
+): IntermediatePermission<C, []>;
 
 // Overload 2: provide + fetchTarget
 export function intermediate<C>(
@@ -74,7 +74,7 @@ export function intermediate<C>(
 ): IntermediatePermission<C, readonly []>;
 
 // Overload 3: provide + fetchTarget + rules
-export function intermediate<C, TRules extends readonly OutputRule<any, any>[]>(
+export function intermediate<C, TRules extends readonly PermissionRule<any, any, any>[]>(
   provide: (ctx: { subject: Subject, target: C }) => Array<{
     subject: Subject,
     key: string,
@@ -85,7 +85,7 @@ export function intermediate<C, TRules extends readonly OutputRule<any, any>[]>(
 ): IntermediatePermission<C, TRules>;
 
 // Implementation
-export function intermediate<C = undefined, TRules extends readonly OutputRule<any, any>[] = readonly []>(
+export function intermediate<C = undefined, TRules extends readonly PermissionRule<any, any, any>[] = readonly []>(
   provide: (ctx: { subject: Subject, target: C }) => Array<{
     subject: Subject,
     key: string,

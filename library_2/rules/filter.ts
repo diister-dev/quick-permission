@@ -4,7 +4,8 @@
 
 import { applyFilter } from "../core/filtering.ts";
 import { mergeFilters } from "../core/merging.ts";
-import type { OutputRule } from "../core/types.ts";
+import type { RuleRequest } from "../core/types.ts";
+import { FilterSpec, PermissionRule } from "../mod.ts";
 
 /**
  * Creates a filter rule that applies field-level permissions
@@ -27,40 +28,59 @@ import type { OutputRule } from "../core/types.ts";
  * const result = await permSystem.can(user, "article.read", "article:1");
  * // result.output.data = { _id: "article:1", title: "Hello", body: "World" }
  */
-export function FilterRule(): OutputRule<
-  { filter?: Record<string, boolean> },
-  { filter?: Record<string, boolean>; data?: any }
+export function FilterRule(): PermissionRule<
+  { filter?: FilterSpec },
+  RuleRequest,
+  { filter?: FilterSpec; data?: any }
 > {
   return {
     name: "filter",
-    output: async ({ state, target, fetchTarget, currentOutput }) => {
-      const filterSpec = state.filter;
+    check: async (state, request, ctx) => {
+      const { target } = request;
+      const { filter } = state;
 
-      if (!filterSpec) {
+      let resource = null;
+
+      const { fetchTarget } = ctx.permission;
+      if (fetchTarget && target !== undefined) {
+        resource = await fetchTarget(target);
+      }
+
+      if (!filter) {
         // No filter on this permission, return current output
-        return currentOutput || {};
+        return {
+          ok: true,
+          output: {
+            data: resource ?? ctx.output?.data,
+            filter: {} as FilterSpec,
+          }
+        };
       }
 
       // Merge with accumulated filter
-      const existingFilter = currentOutput?.filter;
-      const mergedFilter = mergeFilters(existingFilter, filterSpec);
+      const existingFilter = ctx.output?.filter;
+      const mergedFilter = mergeFilters(existingFilter, filter);
 
-      // ✨ Fetch resource using cached fetchTarget
-      if (fetchTarget && target !== undefined) {
-        const resource = await fetchTarget(target);
-
-        if (resource !== undefined && resource !== null) {
-          const filtered = applyFilter(resource, mergedFilter);
-          return {
-            filter: mergedFilter,  // For inspection/debugging
-            data: filtered
-          };
-        }
+      if (resource !== null) {
+        const filtered = applyFilter(resource, mergedFilter);
+        return {
+          ok: true,
+          output: {
+            data: filtered,
+            filter: mergedFilter,
+          }
+        };
       }
 
       // No resource to filter, just return the filter spec
-      return { filter: mergedFilter };
+      return {
+        ok: true,
+        output: {
+          filter: mergedFilter
+        }
+      };
     },
-    defaultState: () => ({ filter: undefined })
+    // Default request
+    default: () => ({ filter: undefined })
   };
 }

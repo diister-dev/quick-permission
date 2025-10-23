@@ -1,4 +1,4 @@
-import type { PermissionProvider, Subject, PermissionWithMetadata } from "../core/types.ts";
+import type { PermissionProvider, Subject, PermissionStateBase } from "../core/types.ts";
 
 /**
  * Creates a direct provider from a static list of permissions
@@ -12,7 +12,7 @@ import type { PermissionProvider, Subject, PermissionWithMetadata } from "../cor
  *   { subject: user2, key: "article.read", target: "article:1" }
  * ])
  */
-export function directProvider(source: PermissionWithMetadata[]): PermissionProvider {
+export function directProvider(source: PermissionStateBase[]): PermissionProvider {
   return {
     provide: async (subject: Subject, _key: string, _target?: any) => {
       return source.filter((entry) => entry.subject.id === subject.id);

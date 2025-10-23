@@ -16,12 +16,20 @@ export function TimeRule(): PermissionRule<
 > {
   return {
     name: "time",
-    check: (state, ctx, _permission) => {
+    check: (state, request) => {
       const start = state.startDate;
       const end = state.endDate;
-      if (start && ctx.checkDate < start) return false;
-      if (end && ctx.checkDate > end) return false;
-      return true;
+      if (start && request.checkDate < start) return {
+        ok: false,
+        reason: "Current date is before the allowed start date",
+      };
+      if (end && request.checkDate > end) return {
+        ok: false,
+        reason: "Current date is after the allowed end date",
+      };
+      return {
+        ok: true
+      };
     },
     default: () => ({ checkDate: new Date() }),
   };

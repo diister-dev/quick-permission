@@ -6,7 +6,7 @@ import type {
   MergeRequestContexts,
   PermissionResult,
   Subject,
-  PermissionWithMetadata,
+  PermissionStateBase,
   Permission,
   IntermediatePermission,
   ExtractPermissionOutput,
@@ -26,9 +26,10 @@ export function createPermissionSystem<
   const {
     schemas,
     sources,
-    rules = [],
-    maxIntermediateDepth = 10
+    rules = []
   } = config;
+
+  const maxIntermediateDepth = 10;
 
   /**
    * Generate default context from all rules
@@ -44,17 +45,17 @@ export function createPermissionSystem<
   /**
    * Resolve intermediate permissions recursively
    */
-  async function resolveIntermediates(
-    permissions: PermissionWithMetadata[],
+  function resolveIntermediates(
+    permissions: PermissionStateBase[],
     depth: number = 0
-  ): Promise<PermissionWithMetadata[]> {
+  ): PermissionStateBase[] {
     if (depth >= maxIntermediateDepth) {
       // Max depth reached, stop resolving
       return permissions;
     }
 
-    const resolved: PermissionWithMetadata[] = [];
-    const toResolve: PermissionWithMetadata[] = [];
+    const resolved: PermissionStateBase[] = [];
+    const toResolve: PermissionStateBase[] = [];
 
     // Separate intermediate from non-intermediate permissions
     for (const perm of permissions) {
@@ -71,30 +72,15 @@ export function createPermissionSystem<
 
     // Resolve all intermediate permissions
     for (const perm of toResolve) {
-      const schema = schemas[perm.key] as IntermediatePermission<any>;
+      const schema = schemas[perm.key] as IntermediatePermission<any, any>;
 
       try {
-        const expanded = schema.provide({
-          subject: perm.subject,
-          target: perm.target,
-        });
-
-        // Add metadata from parent permission to children
-        const withMetadata = expanded.map(exp => ({
-          ...perm, // Keep parent metadata
-          ...exp,  // Override with child data
-        }));
-
-        resolved.push(...withMetadata);
+        const expanded = schema.provide(perm);
+        resolved.push(...resolveIntermediates(expanded, depth + 1));
       } catch (_error) {
         // If provide() fails, skip this intermediate
         continue;
       }
-    }
-
-    // Recursively resolve any new intermediates
-    if (toResolve.length > 0) {
-      return resolveIntermediates(resolved, depth + 1);
     }
 
     return resolved;
@@ -110,62 +96,7 @@ export function createPermissionSystem<
     context: any,
     resourceCache?: Map<string, any>,
   ): Promise<PermissionResult> {
-    // 1. Collect permissions from all providers
-    const providerResults = await Promise.all(
-      sources.map(source => source.provide(subject, key, target))
-    );
-
-    const allPermissions = providerResults.flat();
-
-    // 2. Resolve intermediate permissions recursively
-    const resolvedPermissions = await resolveIntermediates(allPermissions);
-
-    // 3. Filter permissions that match the requested key
-    const matchingPermissions = resolvedPermissions.filter(perm => perm.key === key);
-
-    // 4. Accumulator for valid permissions
-    const validPermissions: PermissionWithMetadata[] = [];
-
-    // 5. Check each matching permission (collect all valid ones)
-    for (const perm of matchingPermissions) {
-      // Check if target matches (if specified)
-      if (perm.target !== undefined && target !== undefined) {
-        if (!matchPath(target, perm.target)) {
-          continue; // Target doesn't match, try next permission
-        }
-      }
-
-      // Apply global validation rules
-      let allRulesPassed = true;
-
-      for (const rule of rules) {
-        const ruleContext = {
-          ...context,
-          subject,
-          key,
-          target,
-        };
-
-        const passed = await rule.check(perm, ruleContext, schemas[key]);
-
-        if (!passed) {
-          allRulesPassed = false;
-          break; // One rule failed, skip this permission
-        }
-      }
-
-      if (allRulesPassed) {
-        // Valid permission, add to accumulator
-        validPermissions.push(perm);
-      }
-    }
-
-    // If no valid permissions found
-    if (validPermissions.length === 0) {
-      return { ok: false };
-    }
-
-    // 6. Get resource cache (from parameter or create local)
+    // Create a cache map if not provided
     const permission = schemas[key];
     const cache = resourceCache || new Map<string, any>();
 
@@ -196,31 +127,86 @@ export function createPermissionSystem<
       }
     };
 
-    // 7. Accumulate outputs from all valid permissions
+    // 1. Collect permissions from all providers
+    const providerResults = await Promise.all(
+      sources.map(source => source.provide(subject, key, target))
+    );
+
+    const allPermissions = providerResults.flat();
+
+    // 2. Resolve intermediate permissions recursively
+    const resolvedPermissions = resolveIntermediates(allPermissions);
+
+    // 3. Filter permissions that match the requested key
+    const matchingPermissions = resolvedPermissions.filter(perm => perm.key === key);
+
+    // 4. Accumulator for valid permissions
+    const validPermissions: PermissionStateBase[] = [];
+
+    // 5. Check each matching permission (collect all valid ones)
+    const failureReasons: string[] = [];
     let accumulatedOutput: any = {};
-
-    for (const perm of validPermissions) {
-      if (permission.rules && permission.rules.length > 0) {
-        for (const outputRule of permission.rules) {
-          const ruleContext = {
-            ...context,
-            subject,
-            key,
-            target,
-          };
-
-          const ruleOutput = await outputRule.output({
-            state: perm,
-            ctx: ruleContext,
-            target,
-            fetchTarget: cachedFetchTarget,  // ✨ Pass cached fetch
-            currentOutput: accumulatedOutput,
-          });
-
-          // Merge this output with accumulated output
-          accumulatedOutput = mergeOutputs(accumulatedOutput, ruleOutput);
+    for (const perm of matchingPermissions) {
+      // Check if target matches (if specified)
+      if (perm.target !== undefined && target !== undefined) {
+        if (!matchPath(target, perm.target)) {
+          continue; // Target doesn't match, try next permission
         }
       }
+
+      // Apply global validation rules
+      let allRulesPassed = true;
+      const allRules = [
+        ...rules,
+        ...(schemas[key]?.rules || []),
+      ]
+
+      for (const rule of allRules) {
+        const ruleContext = {
+          ...context,
+          subject,
+          key,
+          target,
+        };
+
+        const result = await rule.check(perm, ruleContext, {
+          permission: {
+            ...schemas[key],
+            fetchTarget: cachedFetchTarget,
+          },
+          output: {}
+        });
+
+        if (!result.ok) {
+          allRulesPassed = false;
+          failureReasons.push(`Rule "${rule.name}" failed: ${result.reason}`);
+          break; // One rule failed, skip this permission
+        }
+
+        // Merge rule output into accumulated output
+        if (result.output) {
+          accumulatedOutput = mergeOutputs(accumulatedOutput, result.output);
+        }
+      }
+
+      if (allRulesPassed) {
+        // Valid permission, add to accumulator
+        validPermissions.push(perm);
+      }
+    }
+
+    // If no valid permissions found
+    if (validPermissions.length === 0) {
+      return {
+        ok: false,
+        reasons: [
+          ...failureReasons,
+          ...(failureReasons.length === 0
+            ? [`No valid permissions found for key "${key}".`]
+            : []
+          ),
+        ],
+      };
     }
 
     // Return success with accumulated output

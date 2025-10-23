@@ -13,7 +13,7 @@ export type Subject = {
 /**
  * A permission defines access rules without context (leaf node)
  */
-export type Permission<C = undefined, TRules extends readonly OutputRule<any, any>[] = readonly []> = {
+export type Permission<C = undefined, TRules extends readonly PermissionRule<any, any>[] = readonly []> = {
   type: "permission";
   fetchTarget?: (id: C) => Promise<any>;
   rules: TRules;
@@ -22,13 +22,9 @@ export type Permission<C = undefined, TRules extends readonly OutputRule<any, an
 /**
  * An intermediate permission can expand into multiple other permissions
  */
-export type IntermediatePermission<C = undefined, TRules extends readonly OutputRule<any, any>[] = readonly []> = {
+export type IntermediatePermission<C = undefined, TRules extends readonly PermissionRule<any, any>[] = readonly []> = {
   type: "intermediate";
-  provide: (ctx: { subject: Subject, target: C }) => Array<{
-    subject: Subject,
-    key: string,
-    target?: any
-  }>;
+  provide: (ctx: PermissionStateBase) => Array<PermissionStateBase>;
   fetchTarget?: (id: C) => Promise<any>;
   rules: TRules;
 }
@@ -36,78 +32,77 @@ export type IntermediatePermission<C = undefined, TRules extends readonly Output
 /**
  * Either a permission or intermediate permission
  */
-export type PermissionDefinition<C = undefined, TRules extends readonly OutputRule<any, any>[] = any> =
+export type PermissionDefinition<C, TRules extends PermissionRule<any, any, any>[]> =
   | Permission<C, TRules>
   | IntermediatePermission<C, TRules>;
 
 /**
  * Extract the context type from a permission definition
  */
-export type ExtractContext<P> = P extends PermissionDefinition<infer C> ? C : never;
+export type ExtractContext<P> = P extends PermissionDefinition<infer C, any> ? C : never;
 
 /**
  * Schema of all permissions in the system
  */
 export type PermissionSchemas = {
-  [key: string]: PermissionDefinition<any, any>;
+  [key: string]: PermissionDefinition<any, PermissionRule<any, any, any>[]>;
 }
 
 /**
  * A permission with associated metadata
  */
-export type PermissionWithMetadata = {
+export type PermissionStateBase = {
   subject: Subject;
   key: string;
   target?: unknown;
   [key: string]: unknown;
 }
 
+type ReservedKeys = "subject" | "key" | "target";
+
 /**
  * Rule state shape
  */
-export type RuleState = Record<string, unknown>;
+export type RuleState = Omit<Record<string, unknown>, ReservedKeys>;
 
 /**
  * Rule request shape
  */
-export type RuleRequest = Record<string, unknown>;
+export type RuleRequest = Omit<Record<string, unknown>, ReservedKeys>;
 
-/**
- * A permission rule validates a permission based on state and request context
- */
+// Permission rule
+// - Permission State (optional)
+// - Permission Request Context (optional)
+// - Output value (optional)
+type RuleResult<TOutput> = {
+  ok: false,
+  reason: string
+} | {
+  ok: true,
+  output?: TOutput
+};
+
 export type PermissionRule<
   TState extends RuleState = RuleState,
-  TRequest extends RuleRequest = RuleRequest
+  TRequest extends RuleRequest = RuleRequest,
+  TOutput extends Record<string, unknown> = Record<string, unknown>
 > = {
   name: string;
   check: (
-    state: PermissionWithMetadata & Partial<TState>,
-    ctx: TRequest & {
+    // Permission state provided by sources
+    state: PermissionStateBase & Partial<TState>,
+    // Request context
+    request: {
       subject: Subject;
       key: string;
       target?: any;
-    },
-    permission: PermissionDefinition<any>
-  ) => boolean | Promise<boolean>;
+    } & TRequest,
+    ctx: {
+      permission: PermissionDefinition<any, any>,
+      output: any; // Current accumulated output
+    }
+  ) => RuleResult<TOutput> | Promise<RuleResult<TOutput>>;
   default: () => TRequest;
-}
-
-/**
- * An output rule that generates output data (doesn't validate, just transforms)
- */
-export type OutputRule<
-  TState extends RuleState = RuleState,
-  TOutput = any
-> = {
-  name: string;
-  output: (params: {
-    state: PermissionWithMetadata & Partial<TState>;
-    ctx: any;
-    target?: any;
-    fetchTarget?: (id: any) => Promise<any>;  // Cached fetch function
-    currentOutput: any;
-  }) => TOutput | Promise<TOutput>;
-  defaultState?: () => Partial<TState>;
 }
 
 /**
@@ -118,7 +113,7 @@ export type PermissionProvider = {
     subject: Subject,
     key: string,
     target?: any
-  ) => Promise<PermissionWithMetadata[]>;
+  ) => Promise<PermissionStateBase[]>;
 }
 
 /**
@@ -147,17 +142,17 @@ export type PermissionSystemConfig<
 }
 
 /**
- * Extract output type from an OutputRule
+ * Extract output type from an PermissionRule
  */
-export type ExtractRuleOutput<R> = R extends OutputRule<any, infer TOutput> ? TOutput : never;
+export type ExtractRuleOutput<R> = R extends PermissionRule<any, any, infer TOutput> ? TOutput : never;
 
 /**
  * Merge all rule outputs into one type
  */
-export type MergeRuleOutputs<TRules extends readonly OutputRule<any, any>[]> =
+export type MergeRuleOutputs<TRules extends readonly PermissionRule<any, any, any>[]> =
   TRules extends readonly [infer First, ...infer Rest]
-    ? First extends OutputRule<any, infer Out1>
-      ? Rest extends readonly OutputRule<any, any>[]
+    ? First extends PermissionRule<any, any, infer Out1>
+      ? Rest extends readonly PermissionRule<any, any, any>[]
         ? Out1 & MergeRuleOutputs<Rest>
         : Out1
       : never
@@ -168,11 +163,11 @@ export type MergeRuleOutputs<TRules extends readonly OutputRule<any, any>[]> =
  */
 export type ExtractPermissionOutput<P> =
   P extends Permission<any, infer TRules>
-    ? TRules extends readonly OutputRule<any, any>[]
+    ? TRules extends readonly PermissionRule<any, any, any>[]
       ? MergeRuleOutputs<TRules>
       : {}
     : P extends IntermediatePermission<any, infer TRules>
-      ? TRules extends readonly OutputRule<any, any>[]
+      ? TRules extends readonly PermissionRule<any, any, any>[]
         ? MergeRuleOutputs<TRules>
         : {}
       : {};
@@ -181,6 +176,9 @@ export type ExtractPermissionOutput<P> =
  * Result of a permission check
  */
 export type PermissionResult<TOutput = any> = {
-  ok: boolean;
+  ok: false,
+  reasons: string[];
+} | {
+  ok: true;
   output?: TOutput;
 }

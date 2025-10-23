@@ -16,10 +16,17 @@ export function IpRule(): PermissionRule<
 > {
   return {
     name: "ip",
-    check: (state, ctx, _permission) => {
+    check: (state, request) => {
       const allowed = state.allowedIps;
-      if (!allowed?.length) return true;
-      return ctx.ips.some((ip: string) => allowed.includes(ip));
+      if (!allowed?.length) return { ok: true }; // No IP restrictions
+      const valid = request.ips.some((ip: string) => allowed.includes(ip));
+      if (!valid) {
+        return {
+          ok: false,
+          reason: "IP address not allowed",
+        };
+      }
+      return { ok: true };
     },
     default: () => ({ ips: [] }),
   };
