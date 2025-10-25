@@ -1,94 +1,43 @@
 /**
- * Quick Permission Library
- *
- * A flexible and type-safe permission system for TypeScript/JavaScript applications.
- *
- * This library provides a hierarchical permission system with strong type safety, allowing
- * you to define complex permission rules that can be composed together and validated
- * against multiple permission sources.
- *
- * ## Key Features
- *
- * - **Hierarchical Structure**: Organize permissions in an intuitive tree structure
- * - **Strong Type Safety**: Full TypeScript support for permission requests and states
- * - **Rule Composition**: Combine rules with AND, OR, and NOT operators
- * - **Multiple Permission Sources**: Validate against multiple state sources simultaneously
- * - **Performance Focused**: Optimized for efficient validation in large applications
- *
- * ## Basic Usage
- *
- * ```typescript
- * import { hierarchy, permission, validate } from "@diister/quick-permission";
- * import { allowTarget } from "@diister/quick-permission/rules/allowTarget";
- * import { allowOwner } from "@diister/quick-permission/rules/allowOwner";
- *
- * // Create a permission hierarchy
- * const filePermissions = hierarchy({
- *   files: permission({
- *     rules: [allowTarget({ wildcards: true })],
- *     children: {
- *       read: permission({
- *         rules: [allowTarget()],
- *       }),
- *       write: permission({
- *         rules: [allowOwner()],
- *       }),
- *     },
- *   }),
- * });
- *
- * // Define permission states
- * const states = [
- *   {
- *     "files.read": { target: ["file:public/*", "file:user/123/*"] },
- *     "files.write": { target: ["file:user/123/*"] },
- *   },
- * ];
- *
- * // Check a permission request
- * const result = validate(filePermissions, states, "files.read", {
- *   from: "user:123",
- *   target: "file:public/document.txt",
- * });
- *
- * console.log(result.valid); // true
- * ```
+ * Quick Permission - Type-safe permission system
  *
  * @module
  */
 
-// Re-export core components
-export { hierarchy, permission, validate } from "./core/permission.ts";
-export { createDefaultStateSet, satisfiedBy } from "./core/hierarchy.ts";
-export { rule } from "./core/rule.ts";
-export { schema } from "./core/schema.ts";
-
-// Re-export operators
-export { and, merge, not, or } from "./operators/operations.ts";
-
-// Re-export rules
-export { allowOwner } from "./rules/allowOwner/allowOwner.ts";
-export { allowSelf } from "./rules/allowSelf/allowSelf.ts";
-export { allowTarget } from "./rules/allowTarget/allowTarget.ts";
-export { denySelf } from "./rules/denySelf/denySelf.ts";
-export { ensureTime } from "./rules/ensureTime/ensureTime.ts";
-
-// Re-export schemas
-export { owner } from "./schemas/owner/owner.ts";
-export { target } from "./schemas/target/target.ts";
-export { time } from "./schemas/time/time.ts";
-
-// Re-export types
+// Core
+export { createPermissionSystem } from "./core/permission.ts";
+export { matchPath } from "./core/matching.ts";
 export type {
-  Hierarchy,
+  Subject,
   Permission,
-  PermissionHierarchy,
-  PermissionKey,
-  PermissionRequests,
-  PermissionStateSet,
-  ValidationError,
-  ValidationOutcome,
-  ValidationResult,
-} from "./types/common.ts";
-export type { Rule } from "./types/rule.ts";
-export type { Schema } from "./types/schema.ts";
+  IntermediatePermission,
+  PermissionDefinition,
+  PermissionSchemas,
+  PermissionProvider,
+  PermissionRule,
+  PermissionStateBase,
+  PermissionResult,
+  PermissionSystemConfig,
+  MergeRequestContexts,
+  ExtractPermissionOutput,
+  ExtractRuleOutput,
+  MergeRuleOutputs,
+} from "./core/types.ts";
+
+// Helpers
+export { permission, intermediate } from "./helpers/builders.ts";
+
+// Providers
+export { directProvider } from "./providers/direct.ts";
+export { ownerProvider } from "./providers/owner.ts";
+
+// Rules
+export { TimeRule } from "./rules/time.ts";
+export { IpRule } from "./rules/ip.ts";
+export { WithRule } from "./rules/with.ts";
+export { FilterRule } from "./rules/filter.ts";
+
+// Utilities
+export { applyFilter, pickFields } from "./core/filtering.ts";
+export { mergeFilters, mergeOutputs } from "./core/merging.ts";
+export type { FilterSpec } from "./core/merging.ts";
