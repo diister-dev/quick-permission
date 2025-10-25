@@ -1,4 +1,5 @@
-import { createPermissionSystem, FilterRule, intermediate, permission, PermissionProvider, Subject, WithRule } from "../library_2/mod.ts"
+import { createPermissionSystem, FilterRule, intermediate, permission, PermissionProvider, Subject, WithRule } from "../library/mod.ts"
+import { TimeRule } from "../library/rules/time.ts";
 
 async function getUser(id: string): Promise<{ id: string; name: string }> {
   console.log("Getting user:", id);
@@ -30,13 +31,23 @@ function directPermission() : PermissionProvider & {
   }
 }
 
+function selfPermission() : PermissionProvider {
+  return {
+    provide: (subject) => [
+      { subject, key: "user.read", target: subject.id },
+      { subject, key: "user.update", target: subject.id, filter: { name: true } }
+    ]
+  }
+}
+
 const directSource = directPermission();
 
 const permSystem = createPermissionSystem({
   schemas: {
     "user.create": permission(),
-    "user.read": permission(getUser, [WithRule(), FilterRule()] as const),
-    "user.update": permission(getUser, [FilterRule()] as const),
+    "user.read": permission(getUser, [WithRule(), FilterRule()]),
+    "user.update": permission(getUser, [FilterRule()]),
+    "user.delete": permission(getUser, [WithRule()]),
     "user.manage": intermediate((ctx) => {
       return [
         { ...ctx, key: "user.create" },
@@ -48,15 +59,31 @@ const permSystem = createPermissionSystem({
   },
   sources: [
     directSource,
-  ]
+    selfPermission(),
+  ],
+  rules: [TimeRule()]
 });
 
-const subject1 = { id: "subject:1" };
+const subject1 = { id: "user:2" };
 await directSource.add(subject1, "user.manage", {
   target: "user:1",
   filter: { name: true },
-  with: { name: "User user:2" },
+  with: { name: "User user:1" },
+  startDate: new Date(Date.now() + 1000 * 60), // Started 1 minute ago
 });
 
-const result = await permSystem.can(subject1, "user.update", "user:2");
-console.log("Permission granted:", result);
+const permContext = permSystem.context({
+  subject: subject1,
+});
+{
+  const result = await permContext.can("user.update", "user:1");
+  console.log("Permission granted:", result);
+}
+{
+  const result = await permContext.can("user.update", "user:1");
+  console.log("Permission granted:", result);
+}
+{
+  const result = await permContext.can("user.update", "user:1");
+  console.log("Permission granted:", result);
+}

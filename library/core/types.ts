@@ -52,6 +52,7 @@ export type PermissionSchemas = {
  * A permission with associated metadata
  */
 export type PermissionStateBase = {
+  id?: string;
   subject: Subject;
   key: string;
   target?: unknown;
@@ -113,7 +114,7 @@ export type PermissionProvider = {
     subject: Subject,
     key: string,
     target?: any
-  ) => Promise<PermissionStateBase[]>;
+  ) => PermissionStateBase[] | Promise<PermissionStateBase[]>;
 }
 
 /**

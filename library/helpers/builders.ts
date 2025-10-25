@@ -17,18 +17,18 @@ import type { Permission, IntermediatePermission, Subject, PermissionRule } from
 export function permission(): Permission<undefined, []>;
 
 // Overload 2: Only fetchTarget
-export function permission<C>(
+export function permission<const C>(
   fetchTarget: (id: C) => Promise<any>
 ): Permission<C, readonly []>;
 
 // Overload 3: fetchTarget + rules
-export function permission<C, TRules extends readonly PermissionRule<any, any, any>[]>(
+export function permission<const C, const TRules extends readonly PermissionRule<any, any, any>[]>(
   fetchTarget: (id: C) => Promise<any>,
   rules: TRules
 ): Permission<C, TRules>;
 
 // Implementation
-export function permission<C = undefined, TRules extends readonly PermissionRule<any, any, any>[] = readonly []>(
+export function permission<const C = undefined, const TRules extends readonly PermissionRule<any, any, any>[] = readonly []>(
   fetchTarget?: (id: C) => Promise<any>,
   rules?: TRules
 ): Permission<C, TRules> {
@@ -55,7 +55,7 @@ export function permission<C = undefined, TRules extends readonly PermissionRule
  */
 
 // Overload 1: Only provide
-export function intermediate<C>(
+export function intermediate<const C>(
   provide: (ctx: { subject: Subject, target: C }) => Array<{
     subject: Subject,
     key: string,
@@ -74,7 +74,7 @@ export function intermediate<C>(
 ): IntermediatePermission<C, readonly []>;
 
 // Overload 3: provide + fetchTarget + rules
-export function intermediate<C, TRules extends readonly PermissionRule<any, any, any>[]>(
+export function intermediate<const C, const TRules extends readonly PermissionRule<any, any, any>[]>(
   provide: (ctx: { subject: Subject, target: C }) => Array<{
     subject: Subject,
     key: string,
