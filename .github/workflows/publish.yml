@@ -26,4 +26,9 @@ jobs:
 
       - name: Publish package
         working-directory: library
-        run: npx jsr publish
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/develop" ]; then
+            npx jsr publish --allow-dirty
+          else
+            npx jsr publish
+          fi
