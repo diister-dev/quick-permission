@@ -9,14 +9,20 @@ import type { PermissionRule } from "../core/types.ts";
  * WithRule()
  * // State: { with: { owner: "user:1", public: true } }
  * // Will fetch the resource and check if resource.owner === "user:1" && resource.public === true
+ * 
+ * WithRule("withArticle", (target, resource) => resource.article),
+ * WithRule("withComment", (target, resource) => resource.comment),
+ * // State: { withArticle: { author: "user:1" }, withComment: { approved: true } }
+ * // Will fetch the resource and check if resource.article.author === "user:1"
+ * // and resource.comment.approved === true
  */
 export function WithRule<
-  K extends string = "with"
+  const K extends string = "with"
 >(
   withKey: K = "with" as K,
   conditionObj?: (target: any, resource: any) => any
 ): PermissionRule<
-  { [withKey]?: Record<string, any> }
+  Record<K, Record<string, any> | undefined>
 > {
   return {
     name: "with",
