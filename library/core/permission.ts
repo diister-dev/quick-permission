@@ -159,7 +159,15 @@ export function createPermissionSystem<
 
     // 1. Collect permissions from all providers
     const providerResults = await Promise.all(
-      sources.map(source => source.provide(subject, key, target))
+      sources.map(async (source) => {
+        const cacheKey = `${JSON.stringify(subject)}::${key}`;
+        if (cache.has(cacheKey)) {
+          return cache.get(cacheKey);
+        }
+        const result = await source.provide(subject, key, target);
+        cache.set(cacheKey, result);
+        return result;
+      })
     );
 
     const allPermissions = providerResults.flat();
