@@ -21,7 +21,38 @@ export function createPermissionSystem<
   TRules extends readonly PermissionRule<any, any>[]
 >(
   config: PermissionSystemConfig<PS, TRules>
-) {
+): {
+  can<K extends keyof PS>(
+    subject: Subject,
+    key: K,
+    ...args: PS[K] extends Permission<infer C, any> | IntermediatePermission<infer C, any>
+      ? C extends undefined
+        ? []
+        : [C]
+      : []
+  ): Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
+  withContext(context: Partial<MergeRequestContexts<TRules>>): {
+    can<K extends keyof PS>(
+      subject: Subject,
+      key: K,
+      ...args: PS[K] extends Permission<infer C, any> | IntermediatePermission<infer C, any>
+        ? C extends undefined
+          ? []
+          : [C]
+        : []
+    ): Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
+  };
+  context(ctx: Partial<MergeRequestContexts<TRules>> & { subject: Subject; [key: string]: any }): {
+    can<K extends keyof PS>(
+      key: K,
+      ...args: PS[K] extends Permission<infer C, any> | IntermediatePermission<infer C, any>
+        ? C extends undefined
+          ? []
+          : [C]
+        : []
+    ): Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
+  };
+} {
   const {
     schemas,
     sources,
