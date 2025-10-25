@@ -52,7 +52,7 @@ export function FilterRule(): PermissionRule<
           ok: true,
           output: {
             data: resource ?? ctx.output?.data,
-            filter: {} as FilterSpec,
+            filter: undefined,
           }
         };
       }
