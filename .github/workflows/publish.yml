@@ -3,6 +3,8 @@ on:
   push:
     branches:
       - main
+      - develop
+      - release/*
 
 jobs:
   publish:
@@ -15,5 +17,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # If develop add -beta to version
+      - name: Set version for develop branch
+        if: github.ref == 'refs/heads/develop'
+        working-directory: library
+        run: |
+          jq '.version += "-beta.${{ github.run_number }}"' deno.json > tmp.$$.json && mv tmp.$$.json deno.json
+
       - name: Publish package
-        run: cd library && npx jsr publish
+        working-directory: library
+        run: npx jsr publish
