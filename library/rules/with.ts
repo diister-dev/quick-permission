@@ -10,13 +10,18 @@ import type { PermissionRule } from "../core/types.ts";
  * // State: { with: { owner: "user:1", public: true } }
  * // Will fetch the resource and check if resource.owner === "user:1" && resource.public === true
  */
-export function WithRule(): PermissionRule<
-  { with?: Record<string, any> }
+export function WithRule<
+  K extends string = "with"
+>(
+  withKey: K = "with" as K,
+  conditionObj?: (target: any, resource: any) => any
+): PermissionRule<
+  { [withKey]?: Record<string, any> }
 > {
   return {
     name: "with",
     check: async (state, request, ctx) => {
-      if (!state.with) return {
+      if (!state[withKey]) return {
         ok: true
       }; // No 'with' condition, allow
 
@@ -24,10 +29,13 @@ export function WithRule(): PermissionRule<
       if (request.target !== undefined && ctx.permission.fetchTarget) {
         try {
           const resource = await ctx.permission.fetchTarget(request.target);
+          const working = conditionObj
+            ? conditionObj(request.target, resource)
+            : resource;
 
           // Check if resource matches all constraints in 'with'
-          for (const [key, value] of Object.entries(state.with)) {
-            if (resource?.[key] !== value) {
+          for (const [key, value] of Object.entries(state[withKey])) {
+            if (working?.[key] !== value) {
               return {
                 ok: false,
                 reason: `Resource constraint '${key}' does not match`,

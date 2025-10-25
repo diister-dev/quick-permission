@@ -28,7 +28,10 @@ import { FilterSpec, PermissionRule } from "../mod.ts";
  * const result = await permSystem.can(user, "article.read", "article:1");
  * // result.output.data = { _id: "article:1", title: "Hello", body: "World" }
  */
-export function FilterRule(): PermissionRule<
+export function FilterRule(
+  // The resource result to filter on
+  filterOn?: (target: any, resource: any) => any
+): PermissionRule<
   { filter?: FilterSpec },
   RuleRequest,
   { filter?: FilterSpec; data?: any }
@@ -44,6 +47,9 @@ export function FilterRule(): PermissionRule<
       const { fetchTarget } = ctx.permission;
       if (fetchTarget && target !== undefined) {
         resource = await fetchTarget(target);
+        if (filterOn) {
+          resource = filterOn(target, resource);
+        }
       }
 
       if (!filter) {
