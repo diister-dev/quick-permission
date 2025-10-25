@@ -110,6 +110,8 @@ export type PermissionRule<
  * Permission provider interface - sources of permissions
  */
 export type PermissionProvider = {
+  // Optional cache key function to optimize permission fetching
+  cacheKey?: (subject: Subject, key: string, target?: any) => string;
   provide: (
     subject: Subject,
     key: string,
