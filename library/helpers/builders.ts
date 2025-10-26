@@ -1,4 +1,4 @@
-import type { Permission, IntermediatePermission, Subject, PermissionRule } from "../core/types.ts";
+import type { Permission, IntermediatePermission, Subject, PermissionRule, PermissionStateBase } from "../core/types.ts";
 
 /**
  * Creates a permission (leaf node in permission tree)
@@ -56,7 +56,7 @@ export function permission<const C = undefined, const TRules extends readonly Pe
 
 // Overload 1: Only provide
 export function intermediate<const C>(
-  provide: (ctx: { subject: Subject, target: C }) => Array<{
+  provide: (ctx: PermissionStateBase & { target: C }) => Array<{
     subject: Subject,
     key: string,
     target?: any
@@ -65,7 +65,7 @@ export function intermediate<const C>(
 
 // Overload 2: provide + fetchTarget
 export function intermediate<C>(
-  provide: (ctx: { subject: Subject, target: C }) => Array<{
+  provide: (ctx: PermissionStateBase & { target: C }) => Array<{
     subject: Subject,
     key: string,
     target?: any
@@ -75,7 +75,7 @@ export function intermediate<C>(
 
 // Overload 3: provide + fetchTarget + rules
 export function intermediate<const C, const TRules extends readonly PermissionRule<any, any, any>[]>(
-  provide: (ctx: { subject: Subject, target: C }) => Array<{
+  provide: (ctx: PermissionStateBase & { target: C }) => Array<{
     subject: Subject,
     key: string,
     target?: any
@@ -86,7 +86,7 @@ export function intermediate<const C, const TRules extends readonly PermissionRu
 
 // Implementation
 export function intermediate<C = undefined, TRules extends readonly PermissionRule<any, any, any>[] = readonly []>(
-  provide: (ctx: { subject: Subject, target: C }) => Array<{
+  provide: (ctx: PermissionStateBase & { target: C }) => Array<{
     subject: Subject,
     key: string,
     target?: any
