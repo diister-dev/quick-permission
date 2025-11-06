@@ -1,0 +1,147 @@
+import {
+  createPermissionSystem,
+  directProvider,
+  permission,
+  intermediate,
+  type PermissionSchemas,
+  type Subject,
+} from "../mod.ts";
+
+// Define the schema for testing collectPermissions
+const testSchemas = {
+  "article.read": permission(),
+  "article.write": permission(),
+  "article.delete": permission(),
+  "admin": intermediate((perm) => [
+    { key: "article.read", subject: perm.subject },
+    { key: "article.write", subject: perm.subject },
+    { key: "article.delete", subject: perm.subject },
+  ]),
+} satisfies PermissionSchemas;
+
+// Create test subjects
+const alice: Subject = { id: "alice" };
+const bob: Subject = { id: "bob" };
+const charlie: Subject = { id: "charlie" };
+
+// Create permission states
+const testPermissions = [
+  // Alice has direct read and write permissions
+  {
+    subject: alice,
+    key: "article.read",
+  },
+  {
+    subject: alice,
+    key: "article.write",
+  },
+  // Bob has only read permission
+  {
+    subject: bob,
+    key: "article.read",
+  },
+  // Charlie has admin (intermediate permission that expands to all permissions)
+  {
+    subject: charlie,
+    key: "admin",
+  },
+];
+
+// Create the permission system
+const permSystem = createPermissionSystem({
+  schemas: testSchemas,
+  sources: [directProvider(testPermissions)],
+  rules: [],
+});
+
+// Helper for assertions
+function assert(condition: boolean, message: string) {
+  if (!condition) {
+    throw new Error(`Assertion failed: ${message}`);
+  }
+}
+
+Deno.test("collectPermissions - Alice should have 2 permissions collected", async () => {
+  const permissions = await permSystem.collectPermissions(alice, "article.read");
+  assert(permissions.length === 1, `Expected 1 permission, got ${permissions.length}`);
+  assert(permissions[0].key === "article.read", "Permission key should be article.read");
+});
+
+Deno.test("collectPermissions - Bob should have 1 read permission", async () => {
+  const permissions = await permSystem.collectPermissions(bob, "article.read");
+  assert(permissions.length === 1, `Expected 1 permission, got ${permissions.length}`);
+  assert(permissions[0].key === "article.read", "Permission key should be article.read");
+});
+
+Deno.test("collectPermissions - Bob should have 0 write permissions", async () => {
+  const permissions = await permSystem.collectPermissions(bob, "article.write");
+  assert(permissions.length === 0, `Expected 0 permissions, got ${permissions.length}`);
+});
+
+Deno.test("collectPermissions - Charlie with admin should see expanded permissions for read", async () => {
+  const permissions = await permSystem.collectPermissions(charlie, "article.read");
+  // Charlie has admin, which expands to article.read, article.write, article.delete
+  // When filtering by "article.read", we should get 1 permission
+  assert(permissions.length === 1, `Expected 1 permission, got ${permissions.length}`);
+  assert(permissions[0].key === "article.read", "Permission key should be article.read");
+});
+
+Deno.test("collectPermissions - Charlie with admin should see expanded permissions for write", async () => {
+  const permissions = await permSystem.collectPermissions(charlie, "article.write");
+  assert(permissions.length === 1, `Expected 1 permission, got ${permissions.length}`);
+  assert(permissions[0].key === "article.write", "Permission key should be article.write");
+});
+
+Deno.test("collectPermissions - Charlie with admin should see expanded permissions for delete", async () => {
+  const permissions = await permSystem.collectPermissions(charlie, "article.delete");
+  assert(permissions.length === 1, `Expected 1 permission, got ${permissions.length}`);
+  assert(permissions[0].key === "article.delete", "Permission key should be article.delete");
+});
+
+Deno.test("collectPermissions - withContext should work", async () => {
+  const permissions = await permSystem.withContext({}).collectPermissions(
+    alice,
+    "article.read",
+  );
+  assert(permissions.length === 1, `Expected 1 permission, got ${permissions.length}`);
+  assert(permissions[0].key === "article.read", "Permission key should be article.read");
+});
+
+Deno.test("collectPermissions - context() should work", async () => {
+  const checker = permSystem.context({ subject: alice });
+  const permissions = await checker.collectPermissions("article.read");
+  assert(permissions.length === 1, `Expected 1 permission, got ${permissions.length}`);
+  assert(permissions[0].key === "article.read", "Permission key should be article.read");
+});
+
+// Test with target parameter
+const targetSchemas = {
+  "article.read": permission(),
+} satisfies PermissionSchemas;
+
+const targetPermissions = [
+  {
+    subject: alice,
+    key: "article.read",
+    target: "article:1",
+  },
+  {
+    subject: alice,
+    key: "article.read",
+    target: "article:2",
+  },
+];
+
+const targetPermSystem = createPermissionSystem({
+  schemas: targetSchemas,
+  sources: [directProvider(targetPermissions)],
+  rules: [],
+});
+
+Deno.test("collectPermissions - should collect all permissions with targets", async () => {
+  const permissions = await targetPermSystem.collectPermissions(alice, "article.read");
+  // collectPermissions returns all permissions for the key
+  assert(permissions.length === 2, `Expected 2 permissions, got ${permissions.length}`);
+  assert(permissions[0].target === "article:1", "First permission target should be article:1");
+  assert(permissions[1].target === "article:2", "Second permission target should be article:2");
+});

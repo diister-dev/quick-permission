@@ -42,6 +42,16 @@ export type PermissionDefinition<C, TRules extends PermissionRule<any, any, any>
 export type ExtractContext<P> = P extends PermissionDefinition<infer C, any> ? C : never;
 
 /**
+ * Helper type to convert a permission's context type into an optional argument array
+ * If context is undefined, returns empty array [], otherwise returns [C]
+ */
+export type ContextArgs<P> = P extends Permission<infer C, any> | IntermediatePermission<infer C, any>
+  ? C extends undefined
+    ? []
+    : [C]
+  : [];
+
+/**
  * Schema of all permissions in the system
  */
 export type PermissionSchemas = {

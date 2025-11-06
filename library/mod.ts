@@ -22,6 +22,7 @@ export type {
   ExtractPermissionOutput,
   ExtractRuleOutput,
   MergeRuleOutputs,
+  ContextArgs,
 } from "./core/types.ts";
 
 // Helpers

@@ -9,6 +9,7 @@ import type {
   Permission,
   IntermediatePermission,
   ExtractPermissionOutput,
+  ContextArgs,
 } from "./types.ts";
 import { matchPath } from "./matching.ts";
 import { mergeOutputs } from "./merging.ts";
@@ -25,32 +26,34 @@ export function createPermissionSystem<
   can<K extends keyof PS>(
     subject: Subject,
     key: K,
-    ...args: PS[K] extends Permission<infer C, any> | IntermediatePermission<infer C, any>
-      ? C extends undefined
-        ? []
-        : [C]
-      : []
+    ...args: ContextArgs<PS[K]>
   ): Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
+  collectPermissions<K extends keyof PS>(
+    subject: Subject,
+    key: K,
+    ...args: ContextArgs<PS[K]>
+  ): Promise<PermissionStateBase[]>;
   withContext(context: Partial<MergeRequestContexts<TRules>>): {
     can<K extends keyof PS>(
       subject: Subject,
       key: K,
-      ...args: PS[K] extends Permission<infer C, any> | IntermediatePermission<infer C, any>
-        ? C extends undefined
-          ? []
-          : [C]
-        : []
+      ...args: ContextArgs<PS[K]>
     ): Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
+    collectPermissions<K extends keyof PS>(
+      subject: Subject,
+      key: K,
+      ...args: ContextArgs<PS[K]>
+    ): Promise<PermissionStateBase[]>;
   };
   context(ctx: Partial<MergeRequestContexts<TRules>> & { subject: Subject; [key: string]: any }): {
     can<K extends keyof PS>(
       key: K,
-      ...args: PS[K] extends Permission<infer C, any> | IntermediatePermission<infer C, any>
-        ? C extends undefined
-          ? []
-          : [C]
-        : []
+      ...args: ContextArgs<PS[K]>
     ): Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
+    collectPermissions<K extends keyof PS>(
+      key: K,
+      ...args: ContextArgs<PS[K]>
+    ): Promise<PermissionStateBase[]>;
   };
 } {
   const {
@@ -117,6 +120,42 @@ export function createPermissionSystem<
   }
 
   /**
+   * Collect all resolved permissions for a given key
+   */
+  async function collectPermissionsForKey(
+    subject: Subject,
+    key: string,
+    target: any,
+    context: any,
+    resourceCache?: Map<string, any>,
+  ): Promise<PermissionStateBase[]> {
+    const cache = resourceCache || new Map<string, any>();
+
+    // 1. Collect permissions from all providers
+    const providerResults = await Promise.all(
+      sources.map(async (source, index) => {
+        const cacheKey = source.cacheKey ?
+          `${index}::${source.cacheKey(subject, key, target)}`
+          : `${index}::${JSON.stringify(subject)}`;
+        if (cache.has(cacheKey)) {
+          return cache.get(cacheKey);
+        }
+        const result = await source.provide(subject, key, target);
+        cache.set(cacheKey, result);
+        return result;
+      })
+    );
+
+    const allPermissions = providerResults.flat();
+
+    // 2. Resolve intermediate permissions recursively
+    const resolvedPermissions = resolveIntermediates(allPermissions);
+
+    // 3. Filter permissions that match the requested key
+    return resolvedPermissions.filter(perm => perm.key === key);
+  }
+
+  /**
    * Check if a permission is granted
    */
   async function checkPermission(
@@ -157,29 +196,8 @@ export function createPermissionSystem<
       }
     };
 
-    // 1. Collect permissions from all providers
-    const providerResults = await Promise.all(
-      sources.map(async (source, index) => {
-        const cacheKey = source.cacheKey ?
-          `${index}::${source.cacheKey(subject, key, target)}`
-          // Default cache: Only subject
-          : `${index}::${JSON.stringify(subject)}`;
-        if (cache.has(cacheKey)) {
-          return cache.get(cacheKey);
-        }
-        const result = await source.provide(subject, key, target);
-        cache.set(cacheKey, result);
-        return result;
-      })
-    );
-
-    const allPermissions = providerResults.flat();
-
-    // 2. Resolve intermediate permissions recursively
-    const resolvedPermissions = resolveIntermediates(allPermissions);
-
-    // 3. Filter permissions that match the requested key
-    const matchingPermissions = resolvedPermissions.filter(perm => perm.key === key);
+    // Collect all matching permissions
+    const matchingPermissions = await collectPermissionsForKey(subject, key, target, context, cache);
 
     // 4. Accumulator for valid permissions
     const validPermissions: PermissionStateBase[] = [];
@@ -266,11 +284,7 @@ export function createPermissionSystem<
   async function can<K extends keyof PS>(
     subject: Subject,
     key: K,
-    ...args: PS[K] extends Permission<infer C, any> | IntermediatePermission<infer C, any>
-      ? C extends undefined
-        ? []
-        : [C]
-      : []
+    ...args: ContextArgs<PS[K]>
   ): Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>> {
     const target = args[0];
     const mergedContext = await defaultContext();
@@ -284,6 +298,29 @@ export function createPermissionSystem<
   }
 
   /**
+   * Collect all permissions for debugging purposes
+   *
+   * @example
+   * const permissions = await permSystem.collectPermissions(user, "article.read", "article:1")
+   * console.log(permissions) // [{ key: "article.read", target: "article:1", ... }]
+   */
+  async function collectPermissions<K extends keyof PS>(
+    subject: Subject,
+    key: K,
+    ...args: ContextArgs<PS[K]>
+  ): Promise<PermissionStateBase[]> {
+    const target = args[0];
+    const mergedContext = await defaultContext();
+
+    return collectPermissionsForKey(
+      subject,
+      key as string,
+      target,
+      mergedContext,
+    );
+  }
+
+  /**
    * Create a checker with custom context
    */
   function withContext(context: Partial<MergeRequestContexts<TRules>>) {
@@ -291,11 +328,7 @@ export function createPermissionSystem<
       async can<K extends keyof PS>(
         subject: Subject,
         key: K,
-        ...args: PS[K] extends Permission<infer C, any> | IntermediatePermission<infer C, any>
-          ? C extends undefined
-            ? []
-            : [C]
-          : []
+        ...args: ContextArgs<PS[K]>
       ): Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>> {
         return checkPermission(
           subject,
@@ -303,6 +336,18 @@ export function createPermissionSystem<
           args[0],
           { ...await defaultContext(), ...context },
         ) as Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
+      },
+      async collectPermissions<K extends keyof PS>(
+        subject: Subject,
+        key: K,
+        ...args: ContextArgs<PS[K]>
+      ): Promise<PermissionStateBase[]> {
+        return collectPermissionsForKey(
+          subject,
+          key as string,
+          args[0],
+          { ...await defaultContext(), ...context },
+        );
       }
     };
   }
@@ -322,11 +367,7 @@ export function createPermissionSystem<
     return {
       async can<K extends keyof PS>(
         key: K,
-        ...args: PS[K] extends Permission<infer C, any> | IntermediatePermission<infer C, any>
-          ? C extends undefined
-            ? []
-            : [C]
-          : []
+        ...args: ContextArgs<PS[K]>
       ): Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>> {
         const target = args[0];
         const mergedContext = {
@@ -342,12 +383,31 @@ export function createPermissionSystem<
           mergedContext,
           cache  // Pass the shared cache
         ) as Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
+      },
+      async collectPermissions<K extends keyof PS>(
+        key: K,
+        ...args: ContextArgs<PS[K]>
+      ): Promise<PermissionStateBase[]> {
+        const target = args[0];
+        const mergedContext = {
+          ...await defaultContext(),
+          ...ctx,
+        };
+
+        return collectPermissionsForKey(
+          ctx.subject,
+          key as string,
+          target,
+          mergedContext,
+          cache
+        );
       }
     };
   }
 
   return {
     can,
+    collectPermissions,
     withContext,
     context,
   };
