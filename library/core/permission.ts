@@ -29,9 +29,17 @@ export function createPermissionSystem<
     ...args: ContextArgs<PS[K]>
   ): Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
   collectPermissions<K extends keyof PS>(
-    subject: Subject,
-    key: K,
-    ...args: ContextArgs<PS[K]>
+    query: {
+      subject: Subject;
+      key: K;
+    } & (PS[K] extends Permission<infer C, any> | IntermediatePermission<infer C, any>
+      ? C extends undefined
+        ? { target?: never }
+        : { target: C }
+      : { target?: never }),
+    options?: {
+      includeAllKeys?: boolean;
+    }
   ): Promise<PermissionStateBase[]>;
   withContext(context: Partial<MergeRequestContexts<TRules>>): {
     can<K extends keyof PS>(
@@ -40,9 +48,17 @@ export function createPermissionSystem<
       ...args: ContextArgs<PS[K]>
     ): Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
     collectPermissions<K extends keyof PS>(
-      subject: Subject,
-      key: K,
-      ...args: ContextArgs<PS[K]>
+      query: {
+        subject: Subject;
+        key: K;
+      } & (PS[K] extends Permission<infer C, any> | IntermediatePermission<infer C, any>
+        ? C extends undefined
+          ? { target?: never }
+          : { target: C }
+        : { target?: never }),
+      options?: {
+        includeAllKeys?: boolean;
+      }
     ): Promise<PermissionStateBase[]>;
   };
   context(ctx: Partial<MergeRequestContexts<TRules>> & { subject: Subject; [key: string]: any }): {
@@ -51,8 +67,16 @@ export function createPermissionSystem<
       ...args: ContextArgs<PS[K]>
     ): Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
     collectPermissions<K extends keyof PS>(
-      key: K,
-      ...args: ContextArgs<PS[K]>
+      query: {
+        key: K;
+      } & (PS[K] extends Permission<infer C, any> | IntermediatePermission<infer C, any>
+        ? C extends undefined
+          ? { target?: never }
+          : { target: C }
+        : { target?: never }),
+      options?: {
+        includeAllKeys?: boolean;
+      }
     ): Promise<PermissionStateBase[]>;
   };
 } {
@@ -123,24 +147,29 @@ export function createPermissionSystem<
    * Collect all resolved permissions for a given key
    */
   async function collectPermissionsForKey(
-    subject: Subject,
-    key: string,
-    target: any,
-    context: any,
-    resourceCache?: Map<string, any>,
+    query: {
+      subject: Subject;
+      key: string;
+      target?: any;
+      context: any;
+    },
+    options?: {
+      includeAllKeys?: boolean;
+      resourceCache?: Map<string, any>;
+    }
   ): Promise<PermissionStateBase[]> {
-    const cache = resourceCache || new Map<string, any>();
+    const cache = options?.resourceCache || new Map<string, any>();
 
     // 1. Collect permissions from all providers
     const providerResults = await Promise.all(
       sources.map(async (source, index) => {
         const cacheKey = source.cacheKey ?
-          `${index}::${source.cacheKey(subject, key, target)}`
-          : `${index}::${JSON.stringify(subject)}`;
+          `${index}::${source.cacheKey(query.subject, query.key, query.target)}`
+          : `${index}::${JSON.stringify(query.subject)}`;
         if (cache.has(cacheKey)) {
           return cache.get(cacheKey);
         }
-        const result = await source.provide(subject, key, target);
+        const result = await source.provide(query.subject, query.key, query.target);
         cache.set(cacheKey, result);
         return result;
       })
@@ -151,8 +180,11 @@ export function createPermissionSystem<
     // 2. Resolve intermediate permissions recursively
     const resolvedPermissions = resolveIntermediates(allPermissions);
 
-    // 3. Filter permissions that match the requested key
-    return resolvedPermissions.filter(perm => perm.key === key);
+    // 3. Filter permissions that match the requested key (unless includeAllKeys is true)
+    if (options?.includeAllKeys) {
+      return resolvedPermissions;
+    }
+    return resolvedPermissions.filter(perm => perm.key === query.key);
   }
 
   /**
@@ -197,7 +229,10 @@ export function createPermissionSystem<
     };
 
     // Collect all matching permissions
-    const matchingPermissions = await collectPermissionsForKey(subject, key, target, context, cache);
+    const matchingPermissions = await collectPermissionsForKey(
+      { subject, key, target, context },
+      { resourceCache: cache }
+    );
 
     // 4. Accumulator for valid permissions
     const validPermissions: PermissionStateBase[] = [];
@@ -301,22 +336,44 @@ export function createPermissionSystem<
    * Collect all permissions for debugging purposes
    *
    * @example
-   * const permissions = await permSystem.collectPermissions(user, "article.read", "article:1")
+   * // Collect permissions for a specific key
+   * const permissions = await permSystem.collectPermissions({
+   *   subject: user,
+   *   key: "article.read",
+   *   target: "article:1"
+   * })
    * console.log(permissions) // [{ key: "article.read", target: "article:1", ... }]
+   *
+   * // Collect all permissions regardless of key
+   * const allPermissions = await permSystem.collectPermissions(
+   *   { subject: user, key: "article.read" },
+   *   { includeAllKeys: true }
+   * )
+   * console.log(allPermissions) // [{ key: "article.read", ... }, { key: "article.write", ... }, ...]
    */
   async function collectPermissions<K extends keyof PS>(
-    subject: Subject,
-    key: K,
-    ...args: ContextArgs<PS[K]>
+    query: {
+      subject: Subject;
+      key: K;
+    } & (PS[K] extends Permission<infer C, any> | IntermediatePermission<infer C, any>
+      ? C extends undefined
+        ? { target?: never }
+        : { target: C }
+      : { target?: never }),
+    options?: {
+      includeAllKeys?: boolean;
+    }
   ): Promise<PermissionStateBase[]> {
-    const target = args[0];
     const mergedContext = await defaultContext();
 
     return collectPermissionsForKey(
-      subject,
-      key as string,
-      target,
-      mergedContext,
+      {
+        subject: query.subject,
+        key: query.key as string,
+        target: query.target,
+        context: mergedContext,
+      },
+      options
     );
   }
 
@@ -338,15 +395,26 @@ export function createPermissionSystem<
         ) as Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
       },
       async collectPermissions<K extends keyof PS>(
-        subject: Subject,
-        key: K,
-        ...args: ContextArgs<PS[K]>
+        query: {
+          subject: Subject;
+          key: K;
+        } & (PS[K] extends Permission<infer C, any> | IntermediatePermission<infer C, any>
+          ? C extends undefined
+            ? { target?: never }
+            : { target: C }
+          : { target?: never }),
+        options?: {
+          includeAllKeys?: boolean;
+        }
       ): Promise<PermissionStateBase[]> {
         return collectPermissionsForKey(
-          subject,
-          key as string,
-          args[0],
-          { ...await defaultContext(), ...context },
+          {
+            subject: query.subject,
+            key: query.key as string,
+            target: query.target,
+            context: { ...await defaultContext(), ...context },
+          },
+          options
         );
       }
     };
@@ -385,21 +453,33 @@ export function createPermissionSystem<
         ) as Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
       },
       async collectPermissions<K extends keyof PS>(
-        key: K,
-        ...args: ContextArgs<PS[K]>
+        query: {
+          key: K;
+        } & (PS[K] extends Permission<infer C, any> | IntermediatePermission<infer C, any>
+          ? C extends undefined
+            ? { target?: never }
+            : { target: C }
+          : { target?: never }),
+        options?: {
+          includeAllKeys?: boolean;
+        }
       ): Promise<PermissionStateBase[]> {
-        const target = args[0];
         const mergedContext = {
           ...await defaultContext(),
           ...ctx,
         };
 
         return collectPermissionsForKey(
-          ctx.subject,
-          key as string,
-          target,
-          mergedContext,
-          cache
+          {
+            subject: ctx.subject,
+            key: query.key as string,
+            target: query.target,
+            context: mergedContext,
+          },
+          {
+            ...options,
+            resourceCache: cache,
+          }
         );
       }
     };
