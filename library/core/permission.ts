@@ -41,15 +41,13 @@ export function createPermissionSystem<
       includeAllKeys?: boolean;
     }
   ): Promise<PermissionStateBase[]>;
-  withContext(context: Partial<MergeRequestContexts<TRules>>): {
+  withContext(context: Partial<MergeRequestContexts<TRules>> & { subject: Subject }): {
     can<K extends keyof PS>(
-      subject: Subject,
       key: K,
       ...args: ContextArgs<PS[K]>
     ): Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
     collectPermissions<K extends keyof PS>(
       query: {
-        subject: Subject;
         key: K;
       } & (PS[K] extends Permission<infer C, any> | IntermediatePermission<infer C, any>
         ? C extends undefined
@@ -380,37 +378,31 @@ export function createPermissionSystem<
   /**
    * Create a checker with custom context
    */
-  function withContext(context: Partial<MergeRequestContexts<TRules>>) {
+  function withContext(
+    context: Partial<MergeRequestContexts<TRules>> & { subject: Subject }
+  ): any {
     return {
       async can<K extends keyof PS>(
-        subject: Subject,
         key: K,
         ...args: ContextArgs<PS[K]>
       ): Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>> {
+        const target = args[0];
+
         return checkPermission(
-          subject,
+          context.subject,
           key as string,
-          args[0],
+          target,
           { ...await defaultContext(), ...context },
         ) as Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
       },
-      async collectPermissions<K extends keyof PS>(
-        query: {
-          subject: Subject;
-          key: K;
-        } & (PS[K] extends Permission<infer C, any> | IntermediatePermission<infer C, any>
-          ? C extends undefined
-            ? { target?: never }
-            : { target: C }
-          : { target?: never }),
-        options?: {
-          includeAllKeys?: boolean;
-        }
+      async collectPermissions(
+        query: { key: string; target?: unknown },
+        options?: { includeAllKeys?: boolean }
       ): Promise<PermissionStateBase[]> {
         return collectPermissionsForKey(
           {
-            subject: query.subject,
-            key: query.key as string,
+            subject: context.subject,
+            key: query.key,
             target: query.target,
             context: { ...await defaultContext(), ...context },
           },

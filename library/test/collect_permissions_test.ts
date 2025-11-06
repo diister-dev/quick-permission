@@ -99,8 +99,7 @@ Deno.test("collectPermissions - Charlie with admin should see expanded permissio
 });
 
 Deno.test("collectPermissions - withContext should work", async () => {
-  const permissions = await permSystem.withContext({}).collectPermissions({
-    subject: alice,
+  const permissions = await permSystem.withContext({ subject: alice }).collectPermissions({
     key: "article.read",
   });
   assert(permissions.length === 1, `Expected 1 permission, got ${permissions.length}`);
@@ -173,8 +172,8 @@ Deno.test("collectPermissions - includeAllKeys with Charlie's admin permission",
 });
 
 Deno.test("collectPermissions - includeAllKeys with withContext", async () => {
-  const allPermissions = await permSystem.withContext({}).collectPermissions(
-    { subject: alice, key: "article.read" },
+  const allPermissions = await permSystem.withContext({ subject: alice }).collectPermissions(
+    { key: "article.read" },
     { includeAllKeys: true }
   );
   assert(allPermissions.length === 2, `Expected 2 permissions, got ${allPermissions.length}`);
@@ -187,4 +186,27 @@ Deno.test("collectPermissions - includeAllKeys with context()", async () => {
     { includeAllKeys: true }
   );
   assert(allPermissions.length === 2, `Expected 2 permissions, got ${allPermissions.length}`);
+});
+
+// Test withContext with subject
+Deno.test("collectPermissions - withContext with subject should not require subject parameter", async () => {
+  const checker = permSystem.withContext({ subject: alice });
+  const permissions = await checker.collectPermissions({ key: "article.read" });
+  assert(permissions.length === 1, `Expected 1 permission, got ${permissions.length}`);
+  assert(permissions[0].key === "article.read", "Permission key should be article.read");
+});
+
+Deno.test("collectPermissions - withContext with subject and includeAllKeys", async () => {
+  const checker = permSystem.withContext({ subject: alice });
+  const allPermissions = await checker.collectPermissions(
+    { key: "article.read" },
+    { includeAllKeys: true }
+  );
+  assert(allPermissions.length === 2, `Expected 2 permissions, got ${allPermissions.length}`);
+});
+
+Deno.test("can - withContext with subject should not require subject parameter", async () => {
+  const checker = permSystem.withContext({ subject: alice });
+  const result = await checker.can("article.read");
+  assert(result.ok === true, "Alice should have read permission");
 });
