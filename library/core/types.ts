@@ -152,6 +152,7 @@ export type PermissionSystemConfig<
   sources: PermissionProvider[];
   rules?: TRules;
   maxIntermediateDepth?: number;
+  onProviderError?: (error: unknown, providerIndex: number) => void;
 }
 
 /**

@@ -81,7 +81,8 @@ export function createPermissionSystem<
   const {
     schemas,
     sources,
-    rules = []
+    rules = [],
+    onProviderError
   } = config;
 
   const maxIntermediateDepth = 10;
@@ -161,15 +162,21 @@ export function createPermissionSystem<
     // 1. Collect permissions from all providers
     const providerResults = await Promise.all(
       sources.map(async (source, index) => {
-        const cacheKey = source.cacheKey ?
-          `${index}::${source.cacheKey(query.subject, query.key, query.target)}`
-          : `${index}::${JSON.stringify(query.subject)}`;
-        if (cache.has(cacheKey)) {
-          return cache.get(cacheKey);
+        try {
+          const cacheKey = source.cacheKey ?
+            `${index}::${source.cacheKey(query.subject, query.key, query.target)}`
+            : `${index}::${JSON.stringify(query.subject)}`;
+          if (cache.has(cacheKey)) {
+            return cache.get(cacheKey);
+          }
+          const result = await source.provide(query.subject, query.key, query.target);
+          cache.set(cacheKey, result);
+          return result;
+        } catch (error) {
+          // If provider fails, call error handler and return empty array
+          onProviderError?.(error, index);
+          return [];
         }
-        const result = await source.provide(query.subject, query.key, query.target);
-        cache.set(cacheKey, result);
-        return result;
       })
     );
 
