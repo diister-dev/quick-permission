@@ -4,12 +4,14 @@ import type {
   PermissionSystemConfig,
   MergeRequestContexts,
   PermissionResult,
+  DynamicPermissionResult,
   Subject,
   PermissionStateBase,
   Permission,
   IntermediatePermission,
   ExtractPermissionOutput,
   ContextArgs,
+  TargetPath,
 } from "./types.ts";
 import { matchPath } from "./matching.ts";
 import { mergeOutputs } from "./merging.ts";
@@ -28,6 +30,16 @@ export function createPermissionSystem<
     key: K,
     ...args: ContextArgs<PS[K]>
   ): Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
+  /**
+   * Check a permission whose key is only known at runtime (e.g. coming from an
+   * HTTP body). Returns a discriminated result with a `code` for the
+   * "unknown_key" case so callers can differentiate config errors from denials.
+   */
+  canDynamic(
+    subject: Subject,
+    key: string,
+    target?: TargetPath,
+  ): Promise<DynamicPermissionResult>;
   collectPermissions<K extends keyof PS>(
     query: {
       subject: Subject;
@@ -46,6 +58,7 @@ export function createPermissionSystem<
       key: K,
       ...args: ContextArgs<PS[K]>
     ): Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
+    canDynamic(key: string, target?: TargetPath): Promise<DynamicPermissionResult>;
     collectPermissions<K extends keyof PS>(
       query: {
         key: K;
@@ -64,6 +77,7 @@ export function createPermissionSystem<
       key: K,
       ...args: ContextArgs<PS[K]>
     ): Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
+    canDynamic(key: string, target?: TargetPath): Promise<DynamicPermissionResult>;
     collectPermissions<K extends keyof PS>(
       query: {
         key: K;
@@ -324,7 +338,7 @@ export function createPermissionSystem<
    * Check if subject can perform action
    *
    * @example
-   * permSystem.can(user, "article.read", "article:1")
+   * permSystem.can(user, "article.read", ["article:1"])
    */
   async function can<K extends keyof PS>(
     subject: Subject,
@@ -340,6 +354,47 @@ export function createPermissionSystem<
       target,
       mergedContext,
     ) as Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
+  }
+
+  /**
+   * Internal helper for dynamic-key checks.
+   * Validates the key against the schema before checking — unknown keys return
+   * a discriminated result (`code: "unknown_key"`) instead of a generic denial.
+   */
+  async function canDynamicInternal(
+    subject: Subject,
+    key: string,
+    target: TargetPath | undefined,
+    mergedContext: any,
+    resourceCache?: Map<string, any>,
+  ): Promise<DynamicPermissionResult> {
+    if (!(key in schemas)) {
+      return {
+        ok: false,
+        reasons: [`Unknown permission key: "${key}"`],
+        code: "unknown_key",
+      };
+    }
+    return await checkPermission(subject, key, target, mergedContext, resourceCache) as DynamicPermissionResult;
+  }
+
+  /**
+   * Check a permission whose key is known only at runtime (e.g. from a request
+   * body). Returns a {@link DynamicPermissionResult} so callers can distinguish
+   * "no such permission key" from "permission denied".
+   *
+   * @example
+   * const r = await permSystem.canDynamic(user, body.permission, body.target);
+   * if (!r.ok && r.code === "unknown_key") return c.json({ error: "Unknown permission" }, 400);
+   * if (!r.ok) return c.json({ error: "Forbidden" }, 403);
+   */
+  async function canDynamic(
+    subject: Subject,
+    key: string,
+    target?: TargetPath,
+  ): Promise<DynamicPermissionResult> {
+    const mergedContext = await defaultContext();
+    return canDynamicInternal(subject, key, target, mergedContext);
   }
 
   /**
@@ -407,6 +462,14 @@ export function createPermissionSystem<
           { ...await defaultContext(), ...context },
         ) as Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
       },
+      async canDynamic(key: string, target?: TargetPath): Promise<DynamicPermissionResult> {
+        return canDynamicInternal(
+          context.subject,
+          key,
+          target,
+          { ...await defaultContext(), ...context },
+        );
+      },
       async collectPermissions(
         query: { key: string; target?: unknown },
         options?: { includeAllKeys?: boolean }
@@ -456,6 +519,10 @@ export function createPermissionSystem<
           cache  // Pass the shared cache
         ) as Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
       },
+      async canDynamic(key: string, target?: TargetPath): Promise<DynamicPermissionResult> {
+        const mergedContext = { ...await defaultContext(), ...ctx };
+        return canDynamicInternal(ctx.subject, key, target, mergedContext, cache);
+      },
       async collectPermissions<K extends keyof PS>(
         query: {
           key: K;
@@ -491,6 +558,7 @@ export function createPermissionSystem<
 
   return {
     can,
+    canDynamic,
     collectPermissions,
     withContext,
     context,

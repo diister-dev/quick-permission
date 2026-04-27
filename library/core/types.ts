@@ -203,3 +203,17 @@ export type PermissionResult<TOutput = any> = {
   ok: true;
   output?: TOutput;
 }
+
+/**
+ * Result of a dynamic permission check (key resolved at runtime).
+ * Includes a `code` discriminator so consumers can distinguish "no such permission"
+ * (typically a 404 / configuration error) from "permission denied" (a 403).
+ */
+export type DynamicPermissionResult = {
+  ok: false;
+  reasons: string[];
+  code?: "unknown_key";
+} | {
+  ok: true;
+  output?: unknown;
+}

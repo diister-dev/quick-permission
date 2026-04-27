@@ -18,6 +18,7 @@ export type {
   PermissionRule,
   PermissionStateBase,
   PermissionResult,
+  DynamicPermissionResult,
   PermissionSystemConfig,
   MergeRequestContexts,
   ExtractPermissionOutput,
