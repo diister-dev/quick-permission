@@ -156,6 +156,42 @@ export type MergeRequestContexts<TRules extends readonly PermissionRule<any, any
     : {};
 
 /**
+ * Identifies the call site that triggered a permission check.
+ * Used to differentiate observability events.
+ */
+export type CheckMode = "can" | "canDynamic" | "canBroadMatch";
+
+/**
+ * Event payload emitted before a check runs.
+ * Returning `{ skip: <result> }` from `onBeforeCheck` short-circuits the check
+ * and uses the provided result instead — useful for tests and mocks.
+ */
+export type BeforeCheckEvent = {
+  checkId: string;
+  mode: CheckMode;
+  subject: Subject;
+  key: string;
+  target: TargetPath | undefined;
+}
+
+export type BeforeCheckResult = void | undefined | {
+  skip: PermissionResult<unknown>;
+}
+
+/**
+ * Event payload emitted after a check resolves (whether it ran fully or was
+ * short-circuited by `onBeforeCheck`).
+ */
+export type CheckEvent = BeforeCheckEvent & {
+  ok: boolean;
+  durationMs: number;
+  reasons?: string[];
+  output?: unknown;
+  /** True when `onBeforeCheck` short-circuited the check. */
+  shortCircuited: boolean;
+}
+
+/**
  * Configuration for permission system
  */
 export type PermissionSystemConfig<
@@ -167,6 +203,18 @@ export type PermissionSystemConfig<
   rules?: TRules;
   maxIntermediateDepth?: number;
   onProviderError?: (error: unknown, providerIndex: number) => void;
+  /**
+   * Called before each permission check. Returning `{ skip: result }`
+   * short-circuits the check and uses the provided result. Useful for tests,
+   * mocks, or external authorization caches.
+   */
+  onBeforeCheck?: (event: BeforeCheckEvent) => BeforeCheckResult | Promise<BeforeCheckResult>;
+  /**
+   * Called after each permission check resolves. Receives the matching
+   * `checkId` from `onBeforeCheck`. Use for audit logs, slow-check warnings,
+   * tracing spans, etc.
+   */
+  onCheck?: (event: CheckEvent) => void | Promise<void>;
 }
 
 /**

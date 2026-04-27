@@ -12,6 +12,7 @@ import type {
   ExtractPermissionOutput,
   ContextArgs,
   TargetPath,
+  CheckMode,
 } from "./types.ts";
 import { matchPath, overlapPath } from "./matching.ts";
 import { mergeOutputs } from "./merging.ts";
@@ -137,7 +138,9 @@ export function createPermissionSystem<
     schemas,
     sources,
     rules = [],
-    onProviderError
+    onProviderError,
+    onBeforeCheck,
+    onCheck,
   } = config;
 
   const maxIntermediateDepth = 10;
@@ -248,19 +251,17 @@ export function createPermissionSystem<
   }
 
   /**
-   * Check if a permission is granted.
-   *
-   * If `broadMatch` is true, rules that need a fetched resource are skipped.
-   * Used for capability/wildcard checks where the target may include "*"
-   * segments and a fetch is meaningless or impossible.
+   * Run the underlying check (no callbacks).
+   * Pulled out of `checkPermission` so we can wrap the public entry point with
+   * `onBeforeCheck` / `onCheck` instrumentation in one place.
    */
-  async function checkPermission(
+  async function runCheck(
     subject: Subject,
     key: string,
     target: any,
     context: any,
-    resourceCache?: Map<string, any>,
-    broadMatch: boolean = false,
+    resourceCache: Map<string, any> | undefined,
+    broadMatch: boolean,
   ): Promise<PermissionResult> {
     // Create a cache map if not provided
     const permission = schemas[key];
@@ -389,6 +390,64 @@ export function createPermissionSystem<
   }
 
   /**
+   * Public check entry point. Generates a `checkId`, fires `onBeforeCheck`
+   * (with short-circuit support), runs the underlying check, then fires
+   * `onCheck` with the resolved outcome and duration.
+   */
+  async function checkPermission(
+    subject: Subject,
+    key: string,
+    target: any,
+    context: any,
+    resourceCache?: Map<string, any>,
+    broadMatch: boolean = false,
+    mode: CheckMode = "can",
+  ): Promise<PermissionResult> {
+    const checkId = (typeof crypto !== "undefined" && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const startTime = performance.now();
+
+    let shortCircuited = false;
+    let result: PermissionResult;
+
+    if (onBeforeCheck) {
+      const before = await onBeforeCheck({
+        checkId,
+        mode,
+        subject,
+        key,
+        target,
+      });
+      if (before && "skip" in before && before.skip) {
+        shortCircuited = true;
+        result = before.skip as PermissionResult;
+      } else {
+        result = await runCheck(subject, key, target, context, resourceCache, broadMatch);
+      }
+    } else {
+      result = await runCheck(subject, key, target, context, resourceCache, broadMatch);
+    }
+
+    if (onCheck) {
+      await onCheck({
+        checkId,
+        mode,
+        subject,
+        key,
+        target,
+        ok: result.ok,
+        durationMs: performance.now() - startTime,
+        reasons: result.ok ? undefined : (result as { reasons: string[] }).reasons,
+        output: result.ok ? (result as { output?: unknown }).output : undefined,
+        shortCircuited,
+      });
+    }
+
+    return result;
+  }
+
+  /**
    * Check if subject can perform action
    *
    * @example
@@ -430,7 +489,8 @@ export function createPermissionSystem<
         code: "unknown_key",
       };
     }
-    return await checkPermission(subject, key, target, mergedContext, resourceCache, broadMatch) as DynamicPermissionResult;
+    const mode: CheckMode = broadMatch ? "canBroadMatch" : "canDynamic";
+    return await checkPermission(subject, key, target, mergedContext, resourceCache, broadMatch, mode) as DynamicPermissionResult;
   }
 
   /**
