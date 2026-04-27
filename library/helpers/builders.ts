@@ -1,4 +1,4 @@
-import type { Permission, IntermediatePermission, PermissionRule, PermissionStateBase, IntermediateChild } from "../core/types.ts";
+import type { Permission, IntermediatePermission, Subject, PermissionRule, PermissionStateBase } from "../core/types.ts";
 
 /**
  * Creates a permission (leaf node in permission tree)
@@ -57,31 +57,47 @@ export function permission<const C = undefined, const TRules extends readonly Pe
 
 // Overload 1: Only provide
 export function intermediate<const C>(
-  provide: (ctx: PermissionStateBase & { target: C }) => Array<IntermediateChild>
+  provide: (ctx: PermissionStateBase & { target: C }) => Array<{
+    subject: Subject,
+    key: string,
+    target?: any
+  }>
 ): IntermediatePermission<C, []>;
 
 // Overload 2: provide + fetchTarget
 export function intermediate<C>(
-  provide: (ctx: PermissionStateBase & { target: C }) => Array<IntermediateChild>,
+  provide: (ctx: PermissionStateBase & { target: C }) => Array<{
+    subject: Subject,
+    key: string,
+    target?: any
+  }>,
   fetchTarget: (id: C) => Promise<any>
 ): IntermediatePermission<C, readonly []>;
 
 // Overload 3: provide + fetchTarget + rules
 export function intermediate<const C, const TRules extends readonly PermissionRule<any, any, any>[]>(
-  provide: (ctx: PermissionStateBase & { target: C }) => Array<IntermediateChild>,
+  provide: (ctx: PermissionStateBase & { target: C }) => Array<{
+    subject: Subject,
+    key: string,
+    target?: any
+  }>,
   fetchTarget: (id: C) => Promise<any>,
   rules: TRules
 ): IntermediatePermission<C, TRules>;
 
 // Implementation
 export function intermediate<C = undefined, TRules extends readonly PermissionRule<any, any, any>[] = readonly []>(
-  provide: (ctx: PermissionStateBase & { target: C }) => Array<IntermediateChild>,
+  provide: (ctx: PermissionStateBase & { target: C }) => Array<{
+    subject: Subject,
+    key: string,
+    target?: any
+  }>,
   fetchTarget?: (id: C) => Promise<any>,
   rules?: TRules
 ): IntermediatePermission<C, TRules> {
   return {
     type: "intermediate",
-    provide: provide as IntermediatePermission<C, TRules>["provide"],
+    provide,
     fetchTarget,
     rules: (rules ?? []) as TRules,
   } as IntermediatePermission<C, TRules>;

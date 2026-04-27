@@ -131,11 +131,8 @@ export function createPermissionSystem<
       const schema = schemas[perm.key] as IntermediatePermission<any, any>;
 
       try {
-        const children = schema.provide(perm);
-        // Auto-inherit parent state into each child. Children patches override.
-        // A field set to `undefined` in the child explicitly erases parent inheritance.
-        const enriched = children.map((child) => mergeChildIntoParent(perm, child));
-        resolved.push(...resolveIntermediates(enriched, depth + 1));
+        const expanded = schema.provide(perm);
+        resolved.push(...resolveIntermediates(expanded, depth + 1));
       } catch (_error) {
         // If provide() fails, skip this intermediate
         continue;
@@ -143,36 +140,6 @@ export function createPermissionSystem<
     }
 
     return resolved;
-  }
-
-  /**
-   * Merge a child patch into a parent state.
-   * - Parent fields are inherited by default.
-   * - Child fields override parent fields.
-   * - A child field explicitly set to `undefined` erases the parent value.
-   * - `key` always comes from the child (never inherited from parent).
-   */
-  function mergeChildIntoParent(
-    parent: PermissionStateBase,
-    child: Record<string, unknown>,
-  ): PermissionStateBase {
-    const merged: PermissionStateBase = { ...parent };
-
-    for (const [k, v] of Object.entries(child)) {
-      if (v === undefined && k in merged) {
-        // Explicit erase
-        delete merged[k];
-      } else if (v !== undefined) {
-        merged[k] = v;
-      }
-    }
-
-    // The child's key is non-negotiable — it identifies which permission to expand to.
-    if (child.key !== undefined) {
-      merged.key = child.key as string;
-    }
-
-    return merged;
   }
 
   /**

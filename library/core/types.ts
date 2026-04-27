@@ -20,23 +20,11 @@ export type Permission<C = undefined, TRules extends readonly PermissionRule<any
 }
 
 /**
- * A child patch returned by an intermediate's provide function.
- * Only `key` is required — every other field is inherited from the parent
- * unless explicitly overridden. Setting a field to `undefined` erases inheritance.
- */
-export type IntermediateChild = {
-  key: string;
-  subject?: Subject;
-  target?: TargetPath;
-  [field: string]: unknown;
-}
-
-/**
  * An intermediate permission can expand into multiple other permissions
  */
 export type IntermediatePermission<C = undefined, TRules extends readonly PermissionRule<any, any>[] = readonly []> = {
   type: "intermediate";
-  provide: (ctx: PermissionStateBase) => Array<IntermediateChild>;
+  provide: (ctx: PermissionStateBase) => Array<PermissionStateBase>;
   fetchTarget?: (id: C) => Promise<any>;
   rules: TRules;
 }
