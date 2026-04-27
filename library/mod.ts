@@ -9,6 +9,7 @@ export { createPermissionSystem } from "./core/permission.ts";
 export { matchPath } from "./core/matching.ts";
 export type {
   Subject,
+  TargetPath,
   Permission,
   IntermediatePermission,
   PermissionDefinition,

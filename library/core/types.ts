@@ -59,13 +59,20 @@ export type PermissionSchemas = {
 }
 
 /**
- * A permission with associated metadata
+ * A path of segments identifying a target. Always an array.
+ * `undefined` means "any target".
+ */
+export type TargetPath = readonly unknown[];
+
+/**
+ * A permission with associated metadata.
+ * `target` is always an array (a path) or `undefined` (applies to any target).
  */
 export type PermissionStateBase = {
   id?: string;
   subject: Subject;
   key: string;
-  target?: unknown;
+  target?: TargetPath;
   [key: string]: unknown;
 }
 

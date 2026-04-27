@@ -1,32 +1,33 @@
-import type { PermissionProvider, Subject } from "../core/types.ts";
+import type { PermissionProvider, Subject, TargetPath } from "../core/types.ts";
 
 /**
- * Creates a provider that grants permissions based on ownership
+ * Creates a provider that grants permissions based on ownership.
  *
  * @param keys Permission keys to grant
- * @param targetPattern Target pattern (can include wildcards)
- * @returns A permission provider
+ * @param targetPattern Target path pattern (always an array). Use `["article:*"]`
+ *                      for prefix wildcards, `["*"]` for any single-segment target.
+ * @param additionalMetadata Extra fields merged into each grant (e.g. filter spec).
  *
  * @example
- * ownerProvider(["article.read", "article.update"], "article:*")
- * // Grants article.read and article.update on article:* where owner matches subject.id
+ * ownerProvider(["article.read", "article.update"], ["article:*"])
+ * // Grants article.read and article.update on any article where owner matches subject.id
  */
 export function ownerProvider(
   keys: string[],
-  targetPattern: any,
-  additionalMetadata?: Record<string, any>
+  targetPattern: TargetPath,
+  additionalMetadata?: Record<string, unknown>,
 ): PermissionProvider {
   return {
-    provide: async (subject: Subject) => {
-      return keys.map(k => ({
+    provide: (subject: Subject) => {
+      return keys.map((k) => ({
+        ...additionalMetadata,
         subject,
         key: k,
         target: targetPattern,
         with: {
           owner: subject.id,
         },
-        ...additionalMetadata,
       }));
-    }
+    },
   };
 }

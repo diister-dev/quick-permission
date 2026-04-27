@@ -13,10 +13,11 @@ import type { Permission, IntermediatePermission, Subject, PermissionRule, Permi
  * permission(getArticle, [FilterRule()]) // With context and filter rule
  */
 
-// Overload 1: No arguments
-export function permission(): Permission<undefined, []>;
+// Overload 1: No arguments — permission without target type. C defaults to undefined,
+//             but can be set explicitly: `permission<readonly [string]>()`.
+export function permission<const C = undefined>(): Permission<C, []>;
 
-// Overload 2: Only fetchTarget
+// Overload 2: Only fetchTarget — target type inferred from the fetcher
 export function permission<const C>(
   fetchTarget: (id: C) => Promise<any>
 ): Permission<C, readonly []>;

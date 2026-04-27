@@ -122,12 +122,12 @@ const targetPermissions = [
   {
     subject: alice,
     key: "article.read",
-    target: "article:1",
+    target: ["article:1"],
   },
   {
     subject: alice,
     key: "article.read",
-    target: "article:2",
+    target: ["article:2"],
   },
 ];
 
@@ -141,8 +141,8 @@ Deno.test("collectPermissions - should collect all permissions with targets", as
   const permissions = await targetPermSystem.collectPermissions({ subject: alice, key: "article.read" });
   // collectPermissions returns all permissions for the key
   assert(permissions.length === 2, `Expected 2 permissions, got ${permissions.length}`);
-  assert(permissions[0].target === "article:1", "First permission target should be article:1");
-  assert(permissions[1].target === "article:2", "Second permission target should be article:2");
+  assert(JSON.stringify(permissions[0].target) === JSON.stringify(["article:1"]), "First permission target should be ['article:1']");
+  assert(JSON.stringify(permissions[1].target) === JSON.stringify(["article:2"]), "Second permission target should be ['article:2']");
 });
 
 // Test includeAllKeys option

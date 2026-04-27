@@ -246,10 +246,15 @@ export function createPermissionSystem<
     const failureReasons: string[] = [];
     let accumulatedOutput: any = {};
     for (const perm of matchingPermissions) {
-      // Check if target matches (if specified)
-      if (perm.target !== undefined && target !== undefined) {
+      // Check if target matches.
+      // - perm.target === undefined: permission applies to any target.
+      // - target === undefined: request has no target, only matches perms with no target.
+      if (perm.target !== undefined) {
+        if (target === undefined) {
+          continue; // Permission targets something specific; request has no target.
+        }
         if (!matchPath(target, perm.target)) {
-          continue; // Target doesn't match, try next permission
+          continue; // Target doesn't match.
         }
       }
 
