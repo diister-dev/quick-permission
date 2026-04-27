@@ -12,6 +12,7 @@ export type {
   TargetPath,
   Permission,
   IntermediatePermission,
+  IntermediateChild,
   PermissionDefinition,
   PermissionSchemas,
   PermissionProvider,
