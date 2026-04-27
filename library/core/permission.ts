@@ -13,7 +13,7 @@ import type {
   ContextArgs,
   TargetPath,
 } from "./types.ts";
-import { matchPath } from "./matching.ts";
+import { matchPath, overlapPath } from "./matching.ts";
 import { mergeOutputs } from "./merging.ts";
 
 /**
@@ -40,6 +40,35 @@ export function createPermissionSystem<
     key: string,
     target?: TargetPath,
   ): Promise<DynamicPermissionResult>;
+  /**
+   * "Broad match" check: returns ok if the subject has at least one matching
+   * permission, ignoring rules that need a fetched resource (WithRule,
+   * FilterRule). Useful for capability queries where the target may contain
+   * wildcard segments (e.g. `["expo:1", "*"]` to ask "any badge in expo:1").
+   */
+  canBroadMatch<K extends keyof PS>(
+    subject: Subject,
+    key: K,
+    target?: TargetPath,
+  ): Promise<DynamicPermissionResult>;
+  canBroadMatch(
+    subject: Subject,
+    key: string,
+    target?: TargetPath,
+  ): Promise<DynamicPermissionResult>;
+  /**
+   * Returns a `{ key: boolean }` map of which permissions the subject can
+   * exercise on the given target. Each entry uses broad-match semantics
+   * (resource-fetching rules are skipped).
+   *
+   * @param opts.keys Restrict the check to a subset of schema keys. Defaults
+   *                  to every key in the schema.
+   */
+  capabilities(
+    subject: Subject,
+    target?: TargetPath,
+    opts?: { keys?: readonly string[] },
+  ): Promise<Record<string, boolean>>;
   collectPermissions<K extends keyof PS>(
     query: {
       subject: Subject;
@@ -59,6 +88,12 @@ export function createPermissionSystem<
       ...args: ContextArgs<PS[K]>
     ): Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
     canDynamic(key: string, target?: TargetPath): Promise<DynamicPermissionResult>;
+    canBroadMatch<K extends keyof PS>(key: K, target?: TargetPath): Promise<DynamicPermissionResult>;
+    canBroadMatch(key: string, target?: TargetPath): Promise<DynamicPermissionResult>;
+    capabilities(
+      target?: TargetPath,
+      opts?: { keys?: readonly string[] },
+    ): Promise<Record<string, boolean>>;
     collectPermissions<K extends keyof PS>(
       query: {
         key: K;
@@ -78,6 +113,12 @@ export function createPermissionSystem<
       ...args: ContextArgs<PS[K]>
     ): Promise<PermissionResult<ExtractPermissionOutput<PS[K]>>>;
     canDynamic(key: string, target?: TargetPath): Promise<DynamicPermissionResult>;
+    canBroadMatch<K extends keyof PS>(key: K, target?: TargetPath): Promise<DynamicPermissionResult>;
+    canBroadMatch(key: string, target?: TargetPath): Promise<DynamicPermissionResult>;
+    capabilities(
+      target?: TargetPath,
+      opts?: { keys?: readonly string[] },
+    ): Promise<Record<string, boolean>>;
     collectPermissions<K extends keyof PS>(
       query: {
         key: K;
@@ -207,7 +248,11 @@ export function createPermissionSystem<
   }
 
   /**
-   * Check if a permission is granted
+   * Check if a permission is granted.
+   *
+   * If `broadMatch` is true, rules that need a fetched resource are skipped.
+   * Used for capability/wildcard checks where the target may include "*"
+   * segments and a fetch is meaningless or impossible.
    */
   async function checkPermission(
     subject: Subject,
@@ -215,6 +260,7 @@ export function createPermissionSystem<
     target: any,
     context: any,
     resourceCache?: Map<string, any>,
+    broadMatch: boolean = false,
   ): Promise<PermissionResult> {
     // Create a cache map if not provided
     const permission = schemas[key];
@@ -263,13 +309,16 @@ export function createPermissionSystem<
       // Check if target matches.
       // - perm.target === undefined: permission applies to any target.
       // - target === undefined: request has no target, only matches perms with no target.
+      // - In broad-match mode, the request target may itself carry wildcards;
+      //   we use overlapPath (symmetric "could match") instead of matchPath.
       if (perm.target !== undefined) {
         if (target === undefined) {
           continue; // Permission targets something specific; request has no target.
         }
-        if (!matchPath(target, perm.target)) {
-          continue; // Target doesn't match.
-        }
+        const matches = broadMatch
+          ? overlapPath(target as any, perm.target)
+          : matchPath(target as any, perm.target);
+        if (!matches) continue;
       }
 
       // Apply global validation rules
@@ -280,6 +329,11 @@ export function createPermissionSystem<
       ]
 
       for (const rule of allRules) {
+        // Broad-match: skip rules that require a fetched resource (e.g. WithRule,
+        // FilterRule). The remaining rules (TimeRule, IpRule, custom flags) still
+        // gate the result, so a denied broad match is still a denial.
+        if (broadMatch && rule.needsResource) continue;
+
         const ruleContext = {
           ...context,
           subject,
@@ -367,6 +421,7 @@ export function createPermissionSystem<
     target: TargetPath | undefined,
     mergedContext: any,
     resourceCache?: Map<string, any>,
+    broadMatch: boolean = false,
   ): Promise<DynamicPermissionResult> {
     if (!(key in schemas)) {
       return {
@@ -375,7 +430,7 @@ export function createPermissionSystem<
         code: "unknown_key",
       };
     }
-    return await checkPermission(subject, key, target, mergedContext, resourceCache) as DynamicPermissionResult;
+    return await checkPermission(subject, key, target, mergedContext, resourceCache, broadMatch) as DynamicPermissionResult;
   }
 
   /**
@@ -395,6 +450,41 @@ export function createPermissionSystem<
   ): Promise<DynamicPermissionResult> {
     const mergedContext = await defaultContext();
     return canDynamicInternal(subject, key, target, mergedContext);
+  }
+
+  /**
+   * Broad-match check: does the subject have at least one matching permission,
+   * ignoring rules that need a fetched resource? Use when the target may carry
+   * wildcard segments — e.g. "do I have any badge access in this expo?".
+   */
+  async function canBroadMatch(
+    subject: Subject,
+    key: string,
+    target?: TargetPath,
+  ): Promise<DynamicPermissionResult> {
+    const mergedContext = await defaultContext();
+    return canDynamicInternal(subject, key, target, mergedContext, undefined, true);
+  }
+
+  /**
+   * Compute a `{ key: boolean }` map of which permissions the subject can
+   * exercise (broad-match semantics) on the given target.
+   */
+  async function capabilities(
+    subject: Subject,
+    target?: TargetPath,
+    opts?: { keys?: readonly string[] },
+  ): Promise<Record<string, boolean>> {
+    const keys = opts?.keys ?? Object.keys(schemas);
+    const mergedContext = await defaultContext();
+    const resourceCache = new Map<string, any>();
+    const entries = await Promise.all(
+      keys.map(async (k) => {
+        const r = await canDynamicInternal(subject, k, target, mergedContext, resourceCache, true);
+        return [k, r.ok] as const;
+      }),
+    );
+    return Object.fromEntries(entries);
   }
 
   /**
@@ -470,6 +560,38 @@ export function createPermissionSystem<
           { ...await defaultContext(), ...context },
         );
       },
+      async canBroadMatch(key: string, target?: TargetPath): Promise<DynamicPermissionResult> {
+        return canDynamicInternal(
+          context.subject,
+          key,
+          target,
+          { ...await defaultContext(), ...context },
+          undefined,
+          true,
+        );
+      },
+      async capabilities(
+        target?: TargetPath,
+        opts?: { keys?: readonly string[] },
+      ): Promise<Record<string, boolean>> {
+        const keys = opts?.keys ?? Object.keys(schemas);
+        const mergedContext = { ...await defaultContext(), ...context };
+        const resourceCache = new Map<string, any>();
+        const entries = await Promise.all(
+          keys.map(async (k) => {
+            const r = await canDynamicInternal(
+              context.subject,
+              k,
+              target,
+              mergedContext,
+              resourceCache,
+              true,
+            );
+            return [k, r.ok] as const;
+          }),
+        );
+        return Object.fromEntries(entries);
+      },
       async collectPermissions(
         query: { key: string; target?: unknown },
         options?: { includeAllKeys?: boolean }
@@ -523,6 +645,24 @@ export function createPermissionSystem<
         const mergedContext = { ...await defaultContext(), ...ctx };
         return canDynamicInternal(ctx.subject, key, target, mergedContext, cache);
       },
+      async canBroadMatch(key: string, target?: TargetPath): Promise<DynamicPermissionResult> {
+        const mergedContext = { ...await defaultContext(), ...ctx };
+        return canDynamicInternal(ctx.subject, key, target, mergedContext, cache, true);
+      },
+      async capabilities(
+        target?: TargetPath,
+        opts?: { keys?: readonly string[] },
+      ): Promise<Record<string, boolean>> {
+        const keys = opts?.keys ?? Object.keys(schemas);
+        const mergedContext = { ...await defaultContext(), ...ctx };
+        const entries = await Promise.all(
+          keys.map(async (k) => {
+            const r = await canDynamicInternal(ctx.subject, k, target, mergedContext, cache, true);
+            return [k, r.ok] as const;
+          }),
+        );
+        return Object.fromEntries(entries);
+      },
       async collectPermissions<K extends keyof PS>(
         query: {
           key: K;
@@ -559,6 +699,8 @@ export function createPermissionSystem<
   return {
     can,
     canDynamic,
+    canBroadMatch,
+    capabilities,
     collectPermissions,
     withContext,
     context,

@@ -1,4 +1,4 @@
-import { matchPath } from "../core/matching.ts";
+import { matchPath, overlapPath } from "../core/matching.ts";
 
 function assert(condition: boolean, message: string = "") {
   if (!condition) throw new Error(`Assertion failed: ${message}`);
@@ -48,4 +48,39 @@ Deno.test("matchPath - non-string values are matched by equality", () => {
   const obj = { x: 1 };
   assert(matchPath([obj], [obj]) === true, "same reference");
   assert(matchPath([{ x: 1 }], [{ x: 1 }]) === false, "structural equality not supported");
+});
+
+// ─── overlapPath (symmetric "could match") ────────────────────────────────────
+
+Deno.test("overlapPath - exact equality is overlap", () => {
+  assert(overlapPath(["a"], ["a"]) === true);
+});
+
+Deno.test("overlapPath - full wildcard on either side overlaps everything", () => {
+  assert(overlapPath(["*"], ["badge:42"]) === true);
+  assert(overlapPath(["badge:42"], ["*"]) === true);
+});
+
+Deno.test("overlapPath - prefix wildcard vs concrete: standard prefix match", () => {
+  assert(overlapPath(["badge:1"], ["badge:*"]) === true);
+  assert(overlapPath(["badge:*"], ["badge:1"]) === true);
+  assert(overlapPath(["other"], ["badge:*"]) === false);
+});
+
+Deno.test("overlapPath - prefix wildcards overlap when one extends the other", () => {
+  // "badge:*" and "badge:premium:*" overlap (any "badge:premium:X" matches both)
+  assert(overlapPath(["badge:*"], ["badge:premium:*"]) === true);
+  assert(overlapPath(["badge:premium:*"], ["badge:*"]) === true);
+
+  // Disjoint prefixes never overlap
+  assert(overlapPath(["badge:*"], ["visitor:*"]) === false);
+});
+
+Deno.test("overlapPath - request '*' overlaps a grant 'prefix:*'", () => {
+  // The diivento case: ask 'any badge' against a grant 'badge:*'
+  assert(overlapPath(["expo:1", "*"], ["expo:1", "badge:*"]) === true);
+});
+
+Deno.test("overlapPath - arity mismatch never overlaps", () => {
+  assert(overlapPath(["a"], ["a", "b"]) === false);
 });

@@ -26,6 +26,7 @@ export function WithRule<
 > {
   return {
     name: "with",
+    needsResource: true,
     check: async (state, request, ctx) => {
       if (!state[withKey]) return {
         ok: true

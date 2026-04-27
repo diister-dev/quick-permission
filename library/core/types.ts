@@ -106,6 +106,13 @@ export type PermissionRule<
   TOutput extends Record<string, unknown> = Record<string, unknown>
 > = {
   name: string;
+  /**
+   * Set to `true` if this rule fetches the target resource (via
+   * `ctx.permission.fetchTarget`). Broad-match checks (e.g. `canBroadMatch`,
+   * `capabilities`) skip these rules so wildcards in the requested target
+   * don't trigger doomed fetches.
+   */
+  needsResource?: boolean;
   check: (
     // Permission state provided by sources
     state: PermissionStateBase & Partial<TState>,

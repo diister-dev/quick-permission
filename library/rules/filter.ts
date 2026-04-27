@@ -38,6 +38,7 @@ export function FilterRule(
 > {
   return {
     name: "filter",
+    needsResource: true,
     check: async (state, request, ctx) => {
       const { target } = request;
       const { filter } = state;
