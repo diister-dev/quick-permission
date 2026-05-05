@@ -35,7 +35,20 @@ function normalize<S extends string | AnySegment>(spec: S): SpecToSegment<S> {
   return spec as SpecToSegment<S>;
 }
 
-export const target = {
+export interface TargetBuilders {
+  none(): TargetNone;
+  optional<const Spec extends string | AnySegment>(
+    spec: Spec,
+  ): TargetOptional<SpecToSegment<Spec>>;
+  required<const Spec extends string | AnySegment>(
+    spec: Spec,
+  ): TargetRequired<SpecToSegment<Spec>>;
+  path<const Specs extends readonly (string | AnySegment)[]>(
+    ...specs: Specs
+  ): TargetPath<{ -readonly [K in keyof Specs]: SpecToSegment<Specs[K]> }>;
+}
+
+export const target: TargetBuilders = {
   none(): TargetNone {
     return { kind: "none", segments: [] as const };
   },
