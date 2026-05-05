@@ -1,4 +1,4 @@
-import type { TargetPath } from "./types.ts";
+type TargetPath = readonly unknown[];
 
 /**
  * Match a requested target path against a pattern path.

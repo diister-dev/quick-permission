@@ -6,10 +6,6 @@
     ".": {
       "types": "./mod.ts",
       "default": "./mod.ts"
-    },
-    "./declarative": {
-      "types": "./declarative/mod.ts",
-      "default": "./declarative/mod.ts"
     }
   }
 }

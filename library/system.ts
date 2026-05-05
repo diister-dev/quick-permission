@@ -6,7 +6,7 @@ import type {
   SchemaEntry,
 } from "./permission.ts";
 export type { GrantState } from "./permission.ts";
-import { matchPath, overlapPath } from "../core/matching.ts";
+import { matchPath, overlapPath } from "./core/matching.ts";
 
 export type Subject = { id: string; [key: string]: unknown };
 

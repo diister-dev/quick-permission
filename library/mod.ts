@@ -1,50 +1,62 @@
-/**
- * Quick Permission - Type-safe permission system
- *
- * @module
- */
-
-// Core
-export { createPermissionSystem } from "./core/permission.ts";
-export { matchPath, overlapPath } from "./core/matching.ts";
+export { seg, target } from "./target.ts";
 export type {
-  Subject,
+  AnySegment,
+  AnyTarget,
+  SegmentNames,
+  SegmentSpec,
+  SpecToSegment,
+  TargetArgs,
+  TargetNone,
+  TargetOptional,
   TargetPath,
+  TargetRequired,
+} from "./types.ts";
+
+export { payload } from "./payload.ts";
+export type { ExtractPayload, PayloadSpec } from "./payload.ts";
+
+export { custom, filter, ip, match, time } from "./rules.ts";
+export type {
+  CustomCtx,
+  CustomRule,
+  FilterRule,
+  IpRule,
+  MatchRule,
+  Rule,
+  TimeRule,
+} from "./rules.ts";
+
+export { intermediate, permission } from "./permission.ts";
+export type {
+  AnyIntermediate,
+  AnyPermission,
+  Intermediate,
+  IntermediateChild,
   Permission,
-  IntermediatePermission,
-  PermissionDefinition,
-  PermissionSchemas,
-  PermissionProvider,
-  PermissionRule,
-  PermissionStateBase,
-  PermissionResult,
-  DynamicPermissionResult,
-  CheckMode,
-  BeforeCheckEvent,
-  BeforeCheckResult,
-  CheckEvent,
-  PermissionSystemConfig,
-  MergeRequestContexts,
-  ExtractPermissionOutput,
-  ExtractRuleOutput,
-  MergeRuleOutputs,
-  ContextArgs,
-} from "./core/types.ts";
+  PermissionBuilder,
+  PermissionConfig,
+} from "./permission.ts";
 
-// Helpers
-export { permission, intermediate } from "./helpers/builders.ts";
+export { createPermissionFactory } from "./factory.ts";
+export type { PermissionFactory } from "./factory.ts";
 
-// Providers
-export { directProvider } from "./providers/direct.ts";
-export { ownerProvider } from "./providers/owner.ts";
+export { createSystem } from "./system.ts";
+export type {
+  CanContext,
+  CanResult,
+  Grant,
+  ListEntry,
+  Provider,
+  RuleDescriptor,
+  SerializableSegment,
+  SerializableTarget,
+  Subject,
+  System,
+  TreeNode,
+} from "./system.ts";
 
-// Rules
-export { TimeRule } from "./rules/time.ts";
-export { IpRule } from "./rules/ip.ts";
-export { WithRule } from "./rules/with.ts";
-export { FilterRule } from "./rules/filter.ts";
+export { directProvider, ownerProvider } from "./providers.ts";
+export type { DirectGrant } from "./providers.ts";
 
-// Utilities
 export { applyFilter, pickFields } from "./core/filtering.ts";
-export { mergeFilters, mergeOutputs } from "./core/merging.ts";
 export type { FilterSpec } from "./core/merging.ts";
