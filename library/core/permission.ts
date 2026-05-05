@@ -316,9 +316,13 @@ export function createPermissionSystem<
         if (target === undefined) {
           continue; // Permission targets something specific; request has no target.
         }
+        const permTarget = (Array.isArray(perm.target)
+          ? perm.target
+          : [perm.target]) as TargetPath;
+        const reqTarget = (Array.isArray(target) ? target : [target]) as TargetPath;
         const matches = broadMatch
-          ? overlapPath(target as any, perm.target)
-          : matchPath(target as any, perm.target);
+          ? overlapPath(reqTarget, permTarget)
+          : matchPath(reqTarget, permTarget);
         if (!matches) continue;
       }
 

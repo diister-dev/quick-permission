@@ -66,13 +66,14 @@ export type TargetPath = readonly unknown[];
 
 /**
  * A permission with associated metadata.
- * `target` is always an array (a path) or `undefined` (applies to any target).
+ * `target` is normally a path (array) but legacy providers may emit a single
+ * scalar (string) — the runtime auto-normalises before matching.
  */
 export type PermissionStateBase = {
   id?: string;
   subject: Subject;
   key: string;
-  target?: TargetPath;
+  target?: TargetPath | unknown;
   [key: string]: unknown;
 }
 
