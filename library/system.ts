@@ -1,116 +1,239 @@
-import type { AnyTarget, SegmentSpec } from "./types.ts";
+/**
+ * Moteur d'orchestration resource-pipe.
+ *
+ * Responsabilités :
+ *  - Maintenir un cache `(resource.id, dedupKey) → Promise<T>` par context()
+ *  - Filtrer les rules actives (activeWhen) avant de fetcher leurs needs
+ *  - Lancer les fetches en parallèle (Promise.all) avec dedup
+ *  - Évaluer les rules d'un grant en série (préserve l'ordre des reasons)
+ *  - OR sémantique entre grants : un grant qui passe = `ok: true`
+ *  - Validation d'arity du target au boot et au check
+ *
+ * Cf. RFC §"Sémantique d'exécution".
+ */
+
 import type {
-  AnyIntermediate,
-  AnyPermission,
-  GrantState,
-  SchemaEntry,
-} from "./permission.ts";
-export type { GrantState } from "./permission.ts";
-import { matchPath, overlapPath } from "./core/matching.ts";
+  AnyTarget,
+  CanResult,
+  FetchCtx,
+  Grant,
+  ListEntry,
+  Permission,
+  Resource,
+  Rule,
+  SerializableSegment,
+  SerializableTarget,
+  Subject,
+  TreeNode,
+} from "./types.ts";
+import {
+  aggregateConstraints,
+  combineGrantConstraints,
+  type FilterUnion,
+  mergeFilterSpec,
+  resolveFilteredData,
+} from "./aggregation.ts";
 
-export type Subject = { id: string; [key: string]: unknown };
-
-export type Grant = GrantState;
-
-export type Provider = (
+export type ProviderFn = (
   subject: Subject,
   key: string,
   target?: readonly unknown[],
-) => Grant[] | Promise<Grant[]>;
-
-export type SerializableSegment = {
-  name: string;
-  types: string | readonly string[];
-};
-
-export type SerializableTarget =
-  | { kind: "none" }
-  | { kind: "optional"; segment: SerializableSegment }
-  | { kind: "required"; segment: SerializableSegment }
-  | { kind: "path"; segments: readonly SerializableSegment[] };
+) => readonly Grant[] | Promise<readonly Grant[]>;
 
 /**
- * Serialisable description of a rule attached to a permission. Closures
- * (`extractor`, `check`) are stripped — only the `kind` and any structural
- * metadata that names what the rule consumes from a grant is exposed. The
- * frontend dispatches editors per `kind`.
+ * Provider sous forme objet : permet d'opt-in à la dedup de grants
+ * (cacheKey) et au filtrage par préfixe de key (keys/matches).
  *
- * Built-in shapes:
- *  - `{ kind: "match", segment }` → grant.with[segment]
- *  - `{ kind: "filter" }`         → grant.filter
- *  - `{ kind: "time" }`           → grant.startDate / grant.endDate
- *  - `{ kind: "ip" }`             → grant.ips
- *  - `{ kind: "custom" }`         → grant.payload (shape unknown to the lib)
- *
- * Custom rules added by consumers can ship their own descriptor — anything
- * with a `kind` field is preserved through serialisation.
+ * - `keys`/`matches` : le provider est skip si la key demandée ne match pas
+ * - `cacheKey` : grants memoizés par (subject, key, target) au sein d'un context
  */
-export type RuleDescriptor = {
-  readonly kind: string;
-  readonly segment?: string;
-  readonly [extra: string]: unknown;
+export type ProviderObject = {
+  readonly keys?: readonly string[];
+  readonly matches?: (key: string) => boolean;
+  readonly cacheKey?: (
+    subject: Subject,
+    key: string,
+    target?: readonly unknown[],
+  ) => string;
+  readonly fetch: ProviderFn;
 };
 
-export type ListEntry<TMeta> = {
-  key: string;
-  kind: "permission" | "intermediate";
-  metadata: TMeta | undefined;
-  target: SerializableTarget;
-  hasPayload: boolean;
-  rules: readonly RuleDescriptor[];
-};
+export type Provider = ProviderFn | ProviderObject;
 
-export type TreeNode<TMeta> =
-  | {
-    kind: "permission" | "intermediate";
-    key: string;
-    metadata: TMeta | undefined;
-    target: SerializableTarget;
-    hasPayload: boolean;
-    rules: readonly RuleDescriptor[];
+function keyMatchesPattern(key: string, pattern: string): boolean {
+  if (pattern === key) return true;
+  if (pattern.endsWith("*")) {
+    return key.startsWith(pattern.slice(0, -1));
   }
-  | {
-    kind: "group";
-    metadata: undefined;
-    children: Record<string, TreeNode<TMeta>>;
-  };
+  return false;
+}
+
+function providerHandlesKey(provider: ProviderObject, key: string): boolean {
+  if (!provider.keys && !provider.matches) return true;
+  if (provider.keys?.some((p) => keyMatchesPattern(key, p))) return true;
+  if (provider.matches?.(key)) return true;
+  return false;
+}
 
 export type CanContext = {
-  checkDate?: Date;
-  checkIp?: string;
-  /**
-   * When true, the request target may contain wildcards and matches any grant
-   * whose target overlaps. Useful for "do I have any access in expo X?" queries.
-   */
-  broadMatch?: boolean;
+  readonly checkDate?: Date;
+  readonly checkIp?: string;
+  /** True : le target peut contenir des wildcards et matche les grants overlap. */
+  readonly broadMatch?: boolean;
 };
 
-export type CanResult =
-  | {
-    ok: true;
-    output?: { data?: unknown; filter?: Record<string, unknown> };
-    matchedGrants?: readonly string[];
-  }
-  | { ok: false; reasons: string[] };
-
-export type System<TMeta> = {
-  list: () => ListEntry<TMeta>[];
-  tree: () => { children: Record<string, TreeNode<TMeta>> };
-  schema: (key: string) => SchemaEntry | undefined;
-  can: (
+export type System<TMeta = unknown> = {
+  list(): readonly ListEntry<TMeta>[];
+  tree(): { readonly children: Readonly<Record<string, TreeNode<TMeta>>> };
+  schema(key: string): Permission<TMeta> | undefined;
+  /** Check direct (sans cache cross-can) — préfère `context()` en HTTP. */
+  can(
     subject: Subject,
     key: string,
     target?: readonly unknown[],
     context?: CanContext,
-  ) => Promise<CanResult>;
-  context: (
-    bound: { subject: Subject } & CanContext,
-  ) => {
-    can: (key: string, target?: readonly unknown[]) => Promise<CanResult>;
+  ): Promise<CanResult>;
+  /**
+   * Crée un context request-scoped avec cache de fetches partagé entre
+   * tous les `can()` qui en découlent.
+   */
+  context(
+    bound: { readonly subject: Subject } & CanContext,
+  ): {
+    can(key: string, target?: readonly unknown[]): Promise<CanResult>;
+    /** Compteurs de fetches par resource.id (debug / observabilité). */
+    getFetchCounters(): Readonly<Record<string, number>>;
+    /** Reset des compteurs (pas du cache). */
+    clearCounters(): void;
   };
 };
 
-function serializeSegment(s: SegmentSpec): SerializableSegment {
+// ─── Schema validation au boot ──────────────────────────────────────────
+
+function validateSchema<TMeta>(
+  schema: Readonly<Record<string, Permission<TMeta>>>,
+): void {
+  const issues: string[] = [];
+  for (const [key, perm] of Object.entries(schema)) {
+    if (!perm.expandsTo) continue;
+    let samples: readonly Grant[] = [];
+    try {
+      samples = perm.expandsTo({
+        key,
+        target: ["*"],
+      });
+    } catch {
+      // Best-effort : si expandsTo throw sur le stub, on skip.
+      continue;
+    }
+    for (const child of samples) {
+      if (!(child.key in schema)) {
+        issues.push(
+          `intermediate "${key}" expands to unknown key "${child.key}"`,
+        );
+      }
+    }
+  }
+  if (issues.length > 0) {
+    throw new Error(
+      `Schema validation failed:\n  - ${issues.join("\n  - ")}`,
+    );
+  }
+}
+
+// ─── Target matching (wildcards par segment) ────────────────────────────
+
+function asPath(value: unknown): readonly unknown[] {
+  return Array.isArray(value) ? value : [value];
+}
+
+/**
+ * Une request target est une "capability query" si elle contient au moins
+ * un wildcard (`"*"` ou suffix `":*"`). Dans ce mode, on n'a pas de
+ * ressource concrète à fetcher — les rules font silent-pass quand elles
+ * ne peuvent pas vérifier leur contrainte.
+ */
+function isCapabilityQuery(target: readonly unknown[] | undefined): boolean {
+  if (!target) return false;
+  return target.some(
+    (seg) => seg === "*" || (typeof seg === "string" && seg.endsWith("*")),
+  );
+}
+
+function segmentOverlaps(a: unknown, b: unknown): boolean {
+  if (a === "*" || b === "*") return true;
+  if (typeof a === "string" && typeof b === "string") {
+    const aPrefix = a.endsWith("*") ? a.slice(0, -1) : null;
+    const bPrefix = b.endsWith("*") ? b.slice(0, -1) : null;
+    if (aPrefix !== null && bPrefix !== null) {
+      return aPrefix.startsWith(bPrefix) || bPrefix.startsWith(aPrefix);
+    }
+    if (aPrefix !== null) return b.startsWith(aPrefix);
+    if (bPrefix !== null) return a.startsWith(bPrefix);
+  }
+  return a === b;
+}
+
+function targetMatches(
+  grantTarget: readonly unknown[] | unknown | undefined,
+  requestTarget: readonly unknown[] | undefined,
+  schemaKind: AnyTarget["kind"],
+  capability: boolean,
+): boolean {
+  if (schemaKind === "none") return true;
+  if (grantTarget === undefined) return true;
+  if (requestTarget === undefined) return false;
+  const g = asPath(grantTarget);
+  if (g.length !== requestTarget.length) return false;
+  // Capability mode (request has wildcards) uses overlap semantics so a
+  // specific-target grant like ["user:lucas"] still matches ["user:*"].
+  if (capability) {
+    return g.every((seg, i) => segmentOverlaps(seg, requestTarget[i]));
+  }
+  return g.every((seg, i) => {
+    if (seg === "*") return true;
+    if (typeof seg === "string" && seg.endsWith("*")) {
+      const prefix = seg.slice(0, -1);
+      return typeof requestTarget[i] === "string" &&
+        (requestTarget[i] as string).startsWith(prefix);
+    }
+    return seg === requestTarget[i];
+  });
+}
+
+// ─── Intermediate expansion ──────────────────────────────────────────────
+
+function expandGrants<TMeta>(
+  grants: readonly Grant[],
+  schema: Readonly<Record<string, Permission<TMeta>>>,
+  maxDepth = 10,
+): Grant[] {
+  const out: Grant[] = [];
+  const queue: Array<{ grant: Grant; depth: number }> = grants.map((g) => ({
+    grant: g,
+    depth: 0,
+  }));
+  while (queue.length) {
+    const { grant, depth } = queue.shift()!;
+    out.push(grant);
+    if (depth >= maxDepth) continue;
+    const perm = schema[grant.key];
+    if (perm?.expandsTo) {
+      const children = perm.expandsTo(grant);
+      for (const child of children) {
+        queue.push({ grant: child, depth: depth + 1 });
+      }
+    }
+  }
+  return out;
+}
+
+// ─── Serialization (pour list/tree) ──────────────────────────────────────
+
+function serializeSegment(s: {
+  readonly name: string;
+  readonly types: unknown;
+}): SerializableSegment {
   const types = s.types as string | readonly string[];
   return { name: s.name, types };
 }
@@ -131,272 +254,10 @@ function serializeTarget(t: AnyTarget): SerializableTarget {
   }
 }
 
-function isIntermediate(entry: SchemaEntry): entry is AnyIntermediate {
-  return entry.kind === "intermediate";
-}
+// ─── Tree builder ────────────────────────────────────────────────────────
 
-function isPermission(entry: SchemaEntry): entry is AnyPermission {
-  return entry.kind === "permission";
-}
-
-/**
- * Strip closures (extractor / check) from a rule, keeping only serialisable
- * structural fields. Whatever the lib doesn't know about is preserved as-is —
- * custom rules with extra metadata flow through unchanged.
- */
-function describeRule(rule: unknown): RuleDescriptor {
-  if (rule === null || typeof rule !== "object") {
-    return { kind: "unknown" };
-  }
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(rule as Record<string, unknown>)) {
-    if (typeof v === "function") continue;
-    out[k] = v;
-  }
-  if (typeof out.kind !== "string") out.kind = "unknown";
-  return out as RuleDescriptor;
-}
-
-function entryRuleDescriptors(entry: SchemaEntry): readonly RuleDescriptor[] {
-  return (entry.rules ?? []).map(describeRule);
-}
-
-function asPath(value: unknown): readonly unknown[] {
-  return Array.isArray(value) ? value : [value];
-}
-
-function targetMatches(
-  grantTarget: unknown,
-  requestTarget: readonly unknown[] | undefined,
-  schemaKind: AnyTarget["kind"],
-  isAncestorGrant: boolean,
-  broad: boolean,
-): boolean {
-  if (schemaKind === "none") return true;
-  if (grantTarget === undefined) return true;
-  if (requestTarget === undefined) return broad;
-  let g = asPath(grantTarget);
-  const r = requestTarget;
-  // Grant on an intermediate ancestor of the request key with shorter target →
-  // pad the missing trailing segments with wildcards. "I have access to the
-  // whole parent" implicitly covers all sub-resources.
-  if (isAncestorGrant && g.length < r.length) {
-    g = [...g, ...Array(r.length - g.length).fill("*")];
-  }
-  if (broad) return overlapPath(r, g);
-  return matchPath(r, g);
-}
-
-function deepEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (typeof a !== typeof b) return false;
-  if (a === null || b === null) return false;
-  if (typeof a !== "object") return false;
-  if (Array.isArray(a) !== Array.isArray(b)) return false;
-  if (Array.isArray(a) && Array.isArray(b)) {
-    if (a.length !== b.length) return false;
-    return a.every((x, i) => deepEqual(x, b[i]));
-  }
-  const aKeys = Object.keys(a as object);
-  const bKeys = Object.keys(b as object);
-  if (aKeys.length !== bKeys.length) return false;
-  return aKeys.every((k) =>
-    deepEqual(
-      (a as Record<string, unknown>)[k],
-      (b as Record<string, unknown>)[k],
-    )
-  );
-}
-
-function applyFilter(
-  data: unknown,
-  filter: Record<string, boolean | unknown> | undefined,
-): unknown {
-  if (filter === undefined) return data;
-  if (data === null || typeof data !== "object" || Array.isArray(data)) {
-    return data;
-  }
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(filter)) {
-    if (v === true && k in (data as Record<string, unknown>)) {
-      out[k] = (data as Record<string, unknown>)[k];
-    }
-  }
-  return out;
-}
-
-function mergeFilters(
-  a: Record<string, unknown> | undefined,
-  b: Record<string, unknown> | undefined,
-): Record<string, unknown> | undefined {
-  if (a === undefined) return b;
-  if (b === undefined) return a;
-  return { ...a, ...b };
-}
-
-/**
- * Recursively expand grants whose key is an intermediate. Limited depth to
- * guard against accidental expansion cycles.
- */
-function expandGrants(
-  grants: readonly Grant[],
-  schema: Record<string, SchemaEntry>,
-  maxDepth = 10,
-): Grant[] {
-  const out: Grant[] = [];
-  const queue: Array<{ grant: Grant; depth: number }> = grants.map((g) => ({
-    grant: g,
-    depth: 0,
-  }));
-  while (queue.length) {
-    const { grant, depth } = queue.shift()!;
-    out.push(grant);
-    if (depth >= maxDepth) continue;
-    const entry = schema[grant.key];
-    if (entry && isIntermediate(entry)) {
-      const children = entry.expandsTo(grant);
-      for (const child of children) {
-        queue.push({ grant: child, depth: depth + 1 });
-      }
-    }
-  }
-  return out;
-}
-
-function isCapabilityQuery(target: readonly unknown[] | undefined): boolean {
-  if (!target) return false;
-  return target.some(
-    (seg) => seg === "*" || (typeof seg === "string" && seg.endsWith("*")),
-  );
-}
-
-async function evaluateGrant(
-  perm: AnyPermission | AnyIntermediate,
-  grant: Grant,
-  subject: Subject,
-  target: readonly unknown[] | undefined,
-  context: CanContext | undefined,
-): Promise<
-  | { ok: true; data?: unknown; filterUnion?: Record<string, unknown> }
-  | { ok: false; reason: string }
-> {
-  // Capability query: request target carries wildcards ("role:*", "*"), so
-  // there's no concrete resource to fetch. Skip fetch + resource-dependent
-  // rule branches and treat the check as "do I have a grant in principle?".
-  const capability = isCapabilityQuery(target);
-  let resource: unknown = undefined;
-  if (perm.fetch && target !== undefined && !capability) {
-    try {
-      resource = await perm.fetch(target);
-    } catch (e) {
-      return {
-        ok: false,
-        reason: `fetch failed: ${(e as Error).message ?? String(e)}`,
-      };
-    }
-  }
-
-  let filteredData: unknown = undefined;
-  let filterUnion: Record<string, unknown> | undefined = undefined;
-  let appliedFilter = false;
-
-  for (const rule of perm.rules) {
-    switch (rule.kind) {
-      case "match": {
-        const spec = grant.with?.[rule.segment];
-        if (spec === undefined) break;
-        if (capability) {
-          // Constraint can't be verified without a concrete resource; deny.
-          return {
-            ok: false,
-            reason: `match[${rule.segment}] cannot be verified in capability query`,
-          };
-        }
-        const actual = rule.extractor(resource);
-        if (spec === null || typeof spec !== "object" || Array.isArray(spec)) {
-          if (!deepEqual(spec, actual)) {
-            return { ok: false, reason: `match[${rule.segment}] mismatch` };
-          }
-          break;
-        }
-        const actualObj = (actual ?? {}) as Record<string, unknown>;
-        for (const [k, v] of Object.entries(spec)) {
-          if (!deepEqual(v, actualObj[k])) {
-            return {
-              ok: false,
-              reason: `match[${rule.segment}].${k} mismatch`,
-            };
-          }
-        }
-        break;
-      }
-      case "filter": {
-        if (capability) break; // no resource to filter; skip silently
-        const sub = rule.extractor(resource);
-        filteredData = applyFilter(sub, grant.filter);
-        if (grant.filter) {
-          const unionEntries: Record<string, unknown> = {};
-          for (const [k, v] of Object.entries(grant.filter)) {
-            if (v === true) unionEntries[k] = true;
-          }
-          filterUnion = mergeFilters(filterUnion, unionEntries);
-        }
-        appliedFilter = true;
-        break;
-      }
-      case "custom": {
-        const ok = rule.check({
-          resource,
-          payload: grant.payload ?? {},
-          subject,
-          target: target ?? [],
-        });
-        if (!ok) return { ok: false, reason: "custom predicate denied" };
-        break;
-      }
-      case "time": {
-        const now = context?.checkDate ?? new Date();
-        if (grant.startDate && now < grant.startDate) {
-          return { ok: false, reason: "before grant.startDate" };
-        }
-        if (grant.endDate && now > grant.endDate) {
-          return { ok: false, reason: "after grant.endDate" };
-        }
-        break;
-      }
-      case "ip": {
-        if (grant.ips === undefined) break;
-        if (context?.checkIp === undefined) {
-          return {
-            ok: false,
-            reason: "ip restriction set but no checkIp in context",
-          };
-        }
-        if (!grant.ips.includes(context.checkIp)) {
-          return {
-            ok: false,
-            reason: `ip ${context.checkIp} not in grant.ips`,
-          };
-        }
-        break;
-      }
-    }
-  }
-
-  return {
-    ok: true,
-    data: appliedFilter ? filteredData : resource,
-    filterUnion,
-  };
-}
-
-/**
- * Tree built from flat dotted keys. `users.create`, `users.read`, etc. are
- * grouped under a synthetic `users` node when no schema entry exists at
- * `users` itself; otherwise the schema entry sits at that node.
- */
 function buildTree<TMeta>(
-  schema: Record<string, SchemaEntry>,
+  schema: Readonly<Record<string, Permission<TMeta>>>,
 ): { children: Record<string, TreeNode<TMeta>> } {
   const root: { children: Record<string, TreeNode<TMeta>> } = { children: {} };
 
@@ -415,13 +276,12 @@ function buildTree<TMeta>(
     return group;
   }
 
-  for (const [key, entry] of Object.entries(schema)) {
+  for (const [key, perm] of Object.entries(schema)) {
     const parts = key.split(".");
     let cursor: { children: Record<string, TreeNode<TMeta>> } = root;
     for (let i = 0; i < parts.length - 1; i++) {
       const node = ensureGroup(cursor, parts[i]);
       if (node.kind !== "group") {
-        // A leaf already sits here; convert to group lazily by stashing in children.
         const newGroup: TreeNode<TMeta> = {
           kind: "group",
           metadata: undefined,
@@ -430,143 +290,258 @@ function buildTree<TMeta>(
         cursor.children[parts[i]] = newGroup;
         cursor = newGroup;
       } else {
-        cursor = node;
+        cursor = node as { kind: "group"; metadata: undefined; children: Record<string, TreeNode<TMeta>> };
       }
     }
     const leafName = parts[parts.length - 1];
     cursor.children[leafName] = {
-      kind: entry.kind,
+      kind: perm.expandsTo ? "intermediate" : "permission",
       key,
-      metadata: entry.metadata as TMeta | undefined,
-      target: serializeTarget(entry.target),
-      hasPayload: entry.payload !== undefined,
-      rules: entryRuleDescriptors(entry),
+      metadata: perm.metadata,
+      target: serializeTarget(perm.target),
+      rules: perm.rules.map((r) => r.descriptor),
     };
   }
 
   return root;
 }
 
-/**
- * Validates that every intermediate's `expandsTo` only references keys that
- * exist in the schema. Catches typos at boot rather than silently denying.
- * The check calls each intermediate's callback with a stub grant — if the
- * callback requires a specific target shape, the call may throw, in which
- * case the entry is skipped (best-effort validation).
- */
-function validateSchema(schema: Record<string, SchemaEntry>): void {
-  const issues: string[] = [];
-  for (const [key, entry] of Object.entries(schema)) {
-    if (entry.kind !== "intermediate") continue;
-    let samples: readonly GrantState[] = [];
-    try {
-      samples = entry.expandsTo({ key, target: ["*"] });
-    } catch {
-      continue;
-    }
-    for (const child of samples) {
-      if (!(child.key in schema)) {
-        issues.push(
-          `intermediate "${key}" expands to unknown key "${child.key}"`,
-        );
-      }
-    }
-  }
-  if (issues.length > 0) {
-    throw new Error(
-      `Schema validation failed:\n  - ${issues.join("\n  - ")}`,
-    );
-  }
-}
+// ─── createSystem ────────────────────────────────────────────────────────
 
-export function createSystem<TMeta>(config: {
-  schema: Record<string, SchemaEntry>;
-  providers?: Provider[];
+export function createSystem<TMeta = unknown>(opts: {
+  readonly schema: Readonly<Record<string, Permission<TMeta>>>;
+  readonly providers?: readonly Provider[];
 }): System<TMeta> {
-  const { schema, providers = [] } = config;
+  const { schema, providers = [] } = opts;
   validateSchema(schema);
-  const knownKeys = new Set(Object.keys(schema));
 
   return {
-    list: () =>
-      Object.entries(schema).map(([key, entry]) => ({
+    list() {
+      return Object.entries(schema).map(([key, perm]) => ({
         key,
-        kind: entry.kind,
-        metadata: entry.metadata as TMeta | undefined,
-        target: serializeTarget(entry.target),
-        hasPayload: entry.payload !== undefined,
-        rules: entryRuleDescriptors(entry),
-      })),
+        kind: perm.expandsTo ? "intermediate" as const : "permission" as const,
+        metadata: perm.metadata,
+        target: serializeTarget(perm.target),
+        rules: perm.rules.map((r) => r.descriptor),
+      }));
+    },
 
-    tree: () => buildTree<TMeta>(schema),
+    tree() {
+      return buildTree<TMeta>(schema);
+    },
 
-    schema: (key) => schema[key],
+    schema(key) {
+      return schema[key];
+    },
 
-    context: (bound) => ({
-      can: (key, target) => {
-        const { subject, ...ctx } = bound;
-        return systemCan(subject, key, target, ctx);
-      },
-    }),
+    can(subject, key, target, context) {
+      return systemCan(subject, key, target, context, undefined);
+    },
 
-    can: (subject, key, target, context) =>
-      systemCan(subject, key, target, context),
+    context(bound) {
+      const cache = new Map<string, Promise<unknown>>();
+      const grantsCache = new Map<string, Promise<readonly Grant[]>>();
+      const fetchCounters = new Map<string, number>();
+      const { subject, ...ctxOverrides } = bound;
+      return {
+        can(key, target) {
+          return systemCan(subject, key, target, ctxOverrides, {
+            cache,
+            grantsCache,
+            fetchCounters,
+          });
+        },
+        getFetchCounters() {
+          return Object.fromEntries(fetchCounters);
+        },
+        clearCounters() {
+          fetchCounters.clear();
+        },
+      };
+    },
   };
+
+  // ─── Implémentation can() ─────────────────────────────────────────────
+
+  type ContextState = {
+    /** Cache des fetches de Resource au sein d'un context. */
+    readonly cache: Map<string, Promise<unknown>>;
+    /** Cache des grants émis par les providers (pour cacheKey). */
+    readonly grantsCache: Map<string, Promise<readonly Grant[]>>;
+    readonly fetchCounters: Map<string, number>;
+  };
+
+  async function invokeProvider(
+    provider: Provider,
+    subject: Subject,
+    key: string,
+    target: readonly unknown[] | undefined,
+    state: ContextState | undefined,
+  ): Promise<readonly Grant[]> {
+    if (typeof provider === "function") {
+      return await provider(subject, key, target);
+    }
+    if (!providerHandlesKey(provider, key)) return [];
+    const ck = provider.cacheKey?.(subject, key, target);
+    if (state && ck) {
+      let pending = state.grantsCache.get(ck);
+      if (!pending) {
+        pending = Promise.resolve(provider.fetch(subject, key, target));
+        state.grantsCache.set(ck, pending);
+      }
+      return await pending;
+    }
+    return await provider.fetch(subject, key, target);
+  }
+
+  async function fetchResource(
+    resource: Resource<unknown>,
+    ctx: FetchCtx,
+    state: ContextState | undefined,
+  ): Promise<unknown> {
+    if (!state) {
+      // Mode `system.can()` direct — pas de cache cross-grant.
+      return Promise.resolve(resource.fetcher(ctx));
+    }
+    const key = resource.computeDedupKey(ctx);
+    const existing = state.cache.get(key);
+    if (existing) return existing;
+    state.fetchCounters.set(
+      resource.id,
+      (state.fetchCounters.get(resource.id) ?? 0) + 1,
+    );
+    const pending = Promise.resolve(resource.fetcher(ctx));
+    state.cache.set(key, pending);
+    return pending;
+  }
+
+  function validateArity(perm: Permission<TMeta>, target: readonly unknown[] | undefined): string | null {
+    const expected = perm.target.segments.length;
+    const actual = target?.length ?? 0;
+    if (perm.target.kind === "none") {
+      if (actual > 0) return `target arity mismatch: expected 0, got ${actual}`;
+      return null;
+    }
+    if (perm.target.kind === "optional") {
+      if (actual !== 0 && actual !== expected) {
+        return `target arity mismatch: expected 0 or ${expected}, got ${actual}`;
+      }
+      return null;
+    }
+    if (actual !== expected) {
+      return `target arity mismatch: expected ${expected}, got ${actual}`;
+    }
+    return null;
+  }
 
   async function systemCan(
     subject: Subject,
     key: string,
-    target?: readonly unknown[],
-    context?: CanContext,
+    target: readonly unknown[] | undefined,
+    context: CanContext | undefined,
+    state: ContextState | undefined,
   ): Promise<CanResult> {
-    if (!knownKeys.has(key)) {
+    const perm = schema[key];
+    if (!perm) {
       return { ok: false, reasons: [`unknown permission: ${key}`] };
     }
-    const perm = schema[key];
-    if (!perm || (!isPermission(perm) && !isIntermediate(perm))) {
-      return { ok: false, reasons: [`unknown permission: ${key}`] };
+
+    const arityErr = validateArity(perm, target);
+    if (arityErr) return { ok: false, reasons: [arityErr] };
+
+    // Collect grants depuis les providers (en série pour préserver l'ordre)
+    const allGrants: Grant[] = [];
+    for (const provider of providers) {
+      const grants = await invokeProvider(provider, subject, key, target, state);
+      allGrants.push(...grants);
+    }
+
+    const expanded = expandGrants(allGrants, schema);
+
+    const capability = isCapabilityQuery(target);
+    const matching = expanded.filter((g) =>
+      g.key === key &&
+      targetMatches(g.target, target, perm.target.kind, capability)
+    );
+    if (matching.length === 0) {
+      return { ok: false, reasons: ["no matching grant"] };
     }
 
     const reasons: string[] = [];
     let lastData: unknown = undefined;
-    let mergedFilter: Record<string, unknown> | undefined = undefined;
     const matchedGrantIds: string[] = [];
     let anyOk = false;
+    // One entry per matched grant. undefined = "any" (no constraint).
+    const collectedConstraints: Array<Record<string, unknown> | undefined> = [];
+    // Filter rule cross-grant aggregation. `null` once any grant exposes
+    // no filter (= all fields). Else accumulates the union of filter specs.
+    let referenceSource: unknown = undefined;
+    let filterUnion: FilterUnion = undefined;
 
-    for (const provider of providers) {
-      const rawGrants = await provider(subject, key, target);
-      const expanded = expandGrants(rawGrants, schema);
+    for (const grant of matching) {
+      const ctx: FetchCtx = {
+        subject,
+        target: target ?? [],
+        grant,
+        checkDate: context?.checkDate,
+        checkIp: context?.checkIp,
+        capability,
+      };
 
-      for (const grant of expanded) {
-        if (grant.key !== key) continue;
-        const isAncestor = false; // grant.key === request key by the filter above
-        if (
-          !targetMatches(
-            grant.target,
-            target,
-            perm.target.kind,
-            isAncestor,
-            context?.broadMatch === true,
-          )
-        ) continue;
+      const activeRules = perm.rules.filter((r) => {
+        if (r.activeWhen && !r.activeWhen(grant)) return false;
+        return r.needs.every((res) => res.isActiveFor(grant));
+      });
 
-        const evalResult = await evaluateGrant(
-          perm,
-          grant,
-          subject,
-          target,
-          context,
-        );
-        if (!evalResult.ok) {
+      const uniqueResources = capability ? [] : Array.from(
+        new Map(
+          activeRules
+            .flatMap((r) => r.needs)
+            .map((r) => [r.id, r] as const),
+        ).values(),
+      );
+      const fetched = new Map<string, unknown>();
+      await Promise.all(uniqueResources.map(async (r) => {
+        fetched.set(r.id, await fetchResource(r, ctx, state));
+      }));
+
+      let grantOk = true;
+      let grantData: unknown = undefined;
+      // Multiple match rules in one permission (e.g., expositionInfo + badge)
+      // contribute distinct constraints — AND-merge them per grant.
+      const grantConstraints: Record<string, unknown>[] = [];
+      let grantHasMatchRule = false;
+      for (const rule of activeRules) {
+        if (rule.descriptor.kind === "match") grantHasMatchRule = true;
+        const data = rule.needs.map((r) => fetched.get(r.id));
+        const result = rule.check(data, ctx);
+        if (!result.ok) {
+          grantOk = false;
           reasons.push(
-            grant.id ? `[${grant.id}] ${evalResult.reason}` : evalResult.reason,
+            grant.id ? `[${grant.id}] ${result.reason}` : result.reason,
           );
-          continue;
+          break;
         }
+        if (result.data !== undefined) grantData = result.data;
+        if (result.constraint !== undefined) {
+          grantConstraints.push(result.constraint);
+        }
+        if (result.filter !== undefined) {
+          referenceSource = result.filter.source;
+          filterUnion = mergeFilterSpec(filterUnion, result.filter.spec);
+        }
+      }
+
+      if (grantOk) {
         anyOk = true;
         if (grant.id) matchedGrantIds.push(grant.id);
-        if (evalResult.data !== undefined) lastData = evalResult.data;
-        mergedFilter = mergeFilters(mergedFilter, evalResult.filterUnion);
+        if (grantData !== undefined) lastData = grantData;
+        const grantConstraint = combineGrantConstraints(grantConstraints);
+        if (grantHasMatchRule && grantConstraint === undefined) {
+          collectedConstraints.push({});
+        } else {
+          collectedConstraints.push(grantConstraint);
+        }
       }
     }
 
@@ -577,12 +552,16 @@ export function createSystem<TMeta>(config: {
       };
     }
 
+    const constraints = aggregateConstraints(collectedConstraints);
+    const finalData = resolveFilteredData(filterUnion, referenceSource, lastData);
+
     return {
       ok: true,
-      output: lastData !== undefined || mergedFilter !== undefined
-        ? { data: lastData, filter: mergedFilter }
-        : undefined,
-      ...(matchedGrantIds.length > 0 ? { matchedGrants: matchedGrantIds } : {}),
+      ...(finalData !== undefined ? { data: finalData } : {}),
+      ...(constraints !== undefined ? { constraints } : {}),
+      ...(matchedGrantIds.length > 0
+        ? { matchedGrants: matchedGrantIds }
+        : {}),
     };
   }
 }

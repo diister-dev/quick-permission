@@ -1,3 +1,8 @@
+/**
+ * Target builders : `seg(...)` pour décrire un segment et `target.{none,
+ * optional, required, path}` pour assembler un target.
+ */
+
 import type {
   AnySegment,
   SegmentSpec,

@@ -1,62 +1,72 @@
+/**
+ * `@diister/quick-permission` — API publique.
+ *
+ * Expose une primitive unique `defineRule({ needs, check })` autour de
+ * laquelle sont organisés les `Resource`, méthodes de sucre, et le moteur
+ * d'orchestration avec dedup par contexte.
+ *
+ * Cf. `docs/rfc-resource-pipe-api.md` pour la motivation, les décisions
+ * de design et le plan de migration.
+ */
+
+// ─── Targets ─────────────────────────────────────────────────────────────
 export { seg, target } from "./target.ts";
+
+// ─── Core types ──────────────────────────────────────────────────────────
 export type {
   AnySegment,
   AnyTarget,
-  SegmentNames,
+  CanResult,
+  FetchCtx,
+  FilterContribution,
+  Grant,
+  ListEntry,
+  Permission,
+  Resource,
+  ResourceData,
+  ResourcesData,
+  Rule,
+  RuleDescriptor,
+  RuleResult,
   SegmentSpec,
+  SerializableSegment,
+  SerializableTarget,
   SpecToSegment,
+  Subject,
   TargetArgs,
   TargetNone,
   TargetOptional,
   TargetPath,
   TargetRequired,
+  TreeNode,
 } from "./types.ts";
 
-export { payload } from "./payload.ts";
-export type { ExtractPayload, PayloadSpec } from "./payload.ts";
+// ─── Resource factory + sugar methods ────────────────────────────────────
+export { resource } from "./resource.ts";
 
-export { custom, filter, ip, match, time } from "./rules.ts";
-export type {
-  CustomCtx,
-  CustomRule,
-  FilterRule,
-  IpRule,
-  MatchRule,
-  Rule,
-  TimeRule,
-} from "./rules.ts";
+// ─── defineRule + standalone helpers ─────────────────────────────────────
+export { defineRule, matchPath, requireSelf } from "./rules.ts";
+export type { DefineRuleOpts } from "./rules.ts";
 
+// ─── Permission builders ─────────────────────────────────────────────────
 export { intermediate, permission } from "./permission.ts";
 export type {
-  AnyIntermediate,
-  AnyPermission,
-  Intermediate,
-  IntermediateChild,
-  Permission,
+  IntermediateBuilder,
+  IntermediateConfig,
   PermissionBuilder,
   PermissionConfig,
 } from "./permission.ts";
 
-export { createPermissionFactory } from "./factory.ts";
-export type { PermissionFactory } from "./factory.ts";
-
+// ─── System ──────────────────────────────────────────────────────────────
 export { createSystem } from "./system.ts";
 export type {
   CanContext,
-  CanResult,
-  Grant,
-  ListEntry,
   Provider,
-  RuleDescriptor,
-  SerializableSegment,
-  SerializableTarget,
-  Subject,
+  ProviderFn,
+  ProviderObject,
   System,
-  TreeNode,
 } from "./system.ts";
 
-export { directProvider, ownerProvider } from "./providers.ts";
-export type { DirectGrant } from "./providers.ts";
-
+// ─── Field-projection helpers (used outside permission checks too) ───────
 export { applyFilter, pickFields } from "./core/filtering.ts";
 export type { FilterSpec } from "./core/merging.ts";
