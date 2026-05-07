@@ -181,7 +181,12 @@ function targetMatches(
   capability: boolean,
 ): boolean {
   if (schemaKind === "none") return true;
-  if (grantTarget === undefined) return true;
+  if (grantTarget === undefined) {
+    // A target-less grant only matches when the schema permits it.
+    // `optional` documents this "global grant" mode; `required` and `path`
+    // require the grant to carry a target.
+    return schemaKind === "optional";
+  }
   if (requestTarget === undefined) return false;
   const g = asPath(grantTarget);
   if (g.length !== requestTarget.length) return false;
@@ -215,9 +220,20 @@ function expandGrants<TMeta>(
   }));
   while (queue.length) {
     const { grant, depth } = queue.shift()!;
+    const perm = schema[grant.key];
+    // Drop grants that violate the schema's target contract: a grant
+    // without `target` on a `required` / `path` schema cannot match
+    // (see `targetMatches`) and its `expandsTo` cannot synthesize valid
+    // children. Skip silently so one bad grant doesn't break the call.
+    if (
+      perm &&
+      grant.target === undefined &&
+      (perm.target.kind === "required" || perm.target.kind === "path")
+    ) {
+      continue;
+    }
     out.push(grant);
     if (depth >= maxDepth) continue;
-    const perm = schema[grant.key];
     if (perm?.expandsTo) {
       const children = perm.expandsTo(grant);
       for (const child of children) {
