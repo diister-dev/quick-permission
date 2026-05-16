@@ -198,6 +198,16 @@ export interface Resource<T> {
    * (ex: target[0..1] pour programOf qui ignore target[2]).
    */
   readonly dedupKey?: (ctx: FetchCtx) => string;
+  /**
+   * Calcule la cache key pour un target donné (sans subject ni grant).
+   * Utilisé par `CanContext.preseed()` pour injecter une valeur déjà
+   * chargée dans le cache du context. Le caller passe les segments
+   * target attendus, l'engine reconstruit le même key qu'aurait produit
+   * `computeDedupKey({ target, subject, grant })`.
+   *
+   * Par défaut, dérive de `dedupKey` en utilisant un subject minimal.
+   */
+  cacheKeyForTarget(target: readonly unknown[]): string;
 
   /**
    * Vrai si la resource doit être fetchée pour ce grant. Dérive d'`activator`.

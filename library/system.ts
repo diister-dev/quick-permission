@@ -107,6 +107,31 @@ export type System<TMeta = unknown> = {
     bound: { readonly subject: Subject } & CanContext,
   ): {
     can(key: string, target?: readonly unknown[]): Promise<CanResult>;
+    /**
+     * Inject pre-loaded docs into the resource cache so subsequent
+     * `can()` calls skip the fetch. Typical use : after a paginated
+     * list, the caller has all docs in memory — pre-seed them so the
+     * per-doc projection check doesn't hit the DB again.
+     *
+     * `dedupKey(doc)` MUST return the same target segments the resource's
+     * `dedupKey` would compute at fetch time — otherwise the cache key
+     * won't match and the preseed is silently ineffective. For most
+     * resources whose dedupKey is `target[i]`, just return `[doc._id]`
+     * (or the relevant segments).
+     *
+     * `value(doc)` is optional. Defaults to identity (the doc itself,
+     * used for direct resources). Provide it for indirect resources
+     * where the cached value is an array of joined docs nested under
+     * an alias (e.g. `d => d._memberships_of_participant`).
+     */
+    preseed<T, V = T>(
+      resource: Resource<unknown> | IndirectResource | string,
+      docs: ReadonlyArray<T>,
+      opts: {
+        dedupKey: (doc: T) => readonly unknown[];
+        value?: (doc: T) => V;
+      },
+    ): void;
     /** Compteurs de fetches par resource.id (debug / observabilité). */
     getFetchCounters(): Readonly<Record<string, number>>;
     /** Reset des compteurs (pas du cache). */
@@ -429,6 +454,22 @@ export function createSystem<TMeta = unknown>(opts: {
   const { schema, providers = [] } = opts;
   validateSchema(schema);
 
+  // Resource registry built at boot from all rules' `needs` (direct
+  // resources) and indirect descriptors. Enables `ctx.preseed("id", ...)`
+  // to look up the resource by id — callers don't need to import the
+  // resource instance (handy when it lives inside a factory closure).
+  // Typo guard : throws with the list of available ids when missed.
+  const resourceRegistry = new Map<string, Resource<unknown> | IndirectResource>();
+  for (const perm of Object.values(schema)) {
+    for (const rule of perm.rules) {
+      for (const r of rule.needs) {
+        if (!resourceRegistry.has(r.id)) resourceRegistry.set(r.id, r);
+      }
+      const ir = extractIndirectResource(rule);
+      if (ir && !resourceRegistry.has(ir.id)) resourceRegistry.set(ir.id, ir);
+    }
+  }
+
   return {
     list() {
       return Object.entries(schema).map(([key, perm]) => {
@@ -463,6 +504,19 @@ export function createSystem<TMeta = unknown>(opts: {
       const grantsCache = new Map<string, Promise<readonly Grant[]>>();
       const fetchCounters = new Map<string, number>();
       const { subject, ...ctxOverrides } = bound;
+      const resolveResource = (
+        resourceOrId: Resource<unknown> | IndirectResource | string,
+      ): Resource<unknown> | IndirectResource => {
+        if (typeof resourceOrId !== "string") return resourceOrId;
+        const r = resourceRegistry.get(resourceOrId);
+        if (!r) {
+          throw new Error(
+            `preseed: no resource registered with id "${resourceOrId}". ` +
+              `Available: ${[...resourceRegistry.keys()].join(", ") || "(none)"}`,
+          );
+        }
+        return r;
+      };
       return {
         can(key, target) {
           return systemCan(subject, key, target, ctxOverrides, {
@@ -470,6 +524,15 @@ export function createSystem<TMeta = unknown>(opts: {
             grantsCache,
             fetchCounters,
           });
+        },
+        preseed(resourceOrId, docs, opts) {
+          const resource = resolveResource(resourceOrId);
+          const extract = opts.value ?? ((d: unknown) => d);
+          for (const doc of docs) {
+            const target = opts.dedupKey(doc as never);
+            const cacheKey = resource.cacheKeyForTarget(target);
+            cache.set(cacheKey, Promise.resolve(extract(doc as never)));
+          }
         },
         getFetchCounters() {
           return Object.fromEntries(fetchCounters);
@@ -673,6 +736,42 @@ export function createSystem<TMeta = unknown>(opts: {
         fetched.set(r.id, await fetchResource(r, ctx, state));
       }));
 
+      // In concrete mode, indirect resources that declared a `fetcher`
+      // are fetched as well (their joined docs are attached to the ctx
+      // so `indirect.match()` can evaluate the spec). The cache key is
+      // target-derived so `CanContext.preseed()` can inject values
+      // produced by a cap-mode pipeline aggregation (no DB hit when
+      // listed docs already carry the `_lookupAlias`).
+      const indirectFetched = new Map<string, readonly unknown[]>();
+      if (!capability) {
+        const indirectsToFetch = perm.rules
+          .map((r) => extractIndirectResource(r))
+          .filter((ir): ir is IndirectResource => ir !== null && ir.fetcher !== undefined);
+        await Promise.all(indirectsToFetch.map(async (ir) => {
+          const sourceDoc = fetched.get(ir.from.id);
+          if (sourceDoc === undefined || sourceDoc === null) return;
+          const cacheKey = ir.cacheKeyForTarget(ctx.target);
+          if (state) {
+            const existing = state.cache.get(cacheKey);
+            if (existing) {
+              indirectFetched.set(ir.id, (await existing) as readonly unknown[]);
+              return;
+            }
+            const pending = Promise.resolve(ir.fetcher!(sourceDoc, ctx));
+            state.cache.set(cacheKey, pending);
+            indirectFetched.set(ir.id, await pending);
+          } else {
+            indirectFetched.set(ir.id, await ir.fetcher!(sourceDoc, ctx));
+          }
+        }));
+      }
+
+      // Attach indirect-fetched joined docs to the context so
+      // `indirect.match()` rule can read them.
+      const ctxWithIndirect = Object.assign({}, ctx, {
+        _indirectFetched: indirectFetched,
+      });
+
       let grantOk = true;
       let grantData: unknown = undefined;
       // Multiple match rules in one permission (e.g., expositionInfo + badge)
@@ -682,7 +781,7 @@ export function createSystem<TMeta = unknown>(opts: {
       for (const rule of activeRules) {
         if (rule.descriptor.kind === "match") grantHasMatchRule = true;
         const data = rule.needs.map((r) => fetched.get(r.id));
-        const result = rule.check(data, ctx);
+        const result = rule.check(data, ctxWithIndirect);
         if (!result.ok) {
           grantOk = false;
           reasons.push(

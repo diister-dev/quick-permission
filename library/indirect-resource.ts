@@ -20,7 +20,8 @@
  */
 
 import { defineRule } from "./rules.ts";
-import type { Rule } from "./types.ts";
+import { evaluateSpec, validateSpec } from "./mongo-query.ts";
+import type { FetchCtx, Rule } from "./types.ts";
 
 /**
  * Identité de jointure entre une ressource source et la cible jointe.
@@ -62,13 +63,29 @@ export interface IndirectResource {
   readonly to?: { readonly _type?: string };
   readonly cardinality: "one" | "many";
   /**
-   * Crée une rule qui déclare l'utilisation de cette resource indirecte
-   * dans la permission. La rule ne contribue PAS aux `constraints`
-   * classiques — elle est détectée par `system.ts` (via `descriptor.kind`)
-   * qui collecte les indirect resources actives et génère le pipeline
-   * via `buildAggregationStages`.
+   * Fetcher opt-in pour le mode concrete (per-doc check). Quand défini,
+   * la rule `match()` évalue effectivement la condition en mode concrete
+   * (au lieu d'être une sentinelle no-op). Reçoit la valeur de la source
+   * (déjà fetchée par l'engine) et retourne le tableau de docs joints.
    *
-   * Le filtrage effectif vient du `grant.with[id]` poussé par le provider.
+   * Toujours retourner un array, même pour `cardinality: "one"` — la
+   * sémantique du match utilise `$elemMatch`-like (au moins un match).
+   *
+   * Si absent, l'indirect reste sentinelle (legacy) : ne contribue qu'au
+   * pipeline en cap-mode.
+   */
+  readonly fetcher?: (sourceDoc: unknown, ctx: FetchCtx) => readonly unknown[] | Promise<readonly unknown[]>;
+  /** Calcule la cache key pour un target (cf. `Resource.cacheKeyForTarget`). */
+  cacheKeyForTarget(target: readonly unknown[]): string;
+  /**
+   * Crée une rule qui déclare l'utilisation de cette resource indirecte
+   * dans la permission.
+   *
+   * - En cap-mode : sentinelle, détectée par `system.ts` qui collecte
+   *   l'indirect pour générer le pipeline (cf. `buildAggregationStages`).
+   * - En concrete-mode + `fetcher` défini : fetche les docs joints et
+   *   évalue `grant.with[id]` contre eux (au moins un doc match).
+   *   Sans `fetcher`, sentinelle aussi (no-op).
    */
   match(): Rule;
 }
@@ -84,6 +101,7 @@ interface IndirectResourceSpec {
   readonly on: IndirectResourceJoin;
   readonly to?: { readonly _type?: string };
   readonly cardinality: "one" | "many";
+  readonly fetch?: (sourceDoc: unknown, ctx: FetchCtx) => readonly unknown[] | Promise<readonly unknown[]>;
 }
 
 /**
@@ -112,14 +130,45 @@ export function indirectResource(spec: IndirectResourceSpec): IndirectResource {
     on: spec.on,
     to: spec.to,
     cardinality: spec.cardinality,
+    fetcher: spec.fetch,
+    cacheKeyForTarget(target: readonly unknown[]): string {
+      // Mirror of Resource.cacheKeyForTarget — the indirect's cache key
+      // is target-derived (typically by source dedup). Useful for
+      // `CanContext.preseed()` when the caller wants to inject joined
+      // docs already returned by a pipeline aggregation.
+      return `${spec.id}::${JSON.stringify(target)}`;
+    },
     match() {
       return defineRule({
         kind: INDIRECT_RULE_KIND,
         needs: [],
         describe: () => ({ indirectResource: impl }),
-        // Always pass — the contribution happens out-of-band via
-        // descriptor introspection in system.ts.
-        check: () => ({ ok: true }),
+        check: (_data, _payload, ctx) => {
+          // Cap-mode : sentinelle. `system.ts` reads the descriptor and
+          // emits the pipeline via `buildAggregationStages`. The rule
+          // itself contributes nothing.
+          if (ctx.capability) return { ok: true };
+
+          // Concrete mode without fetcher : sentinelle aussi (legacy).
+          if (!impl.fetcher) return { ok: true };
+
+          // Concrete mode with fetcher : evaluate `grant.with[id]` spec
+          // against the joined docs. The engine already populated the
+          // joined docs in the context cache (see system.ts) — we just
+          // read them from `_indirectFetched` (an opaque per-rule pass).
+          // If no spec is set, the rule passes (the grant trusts the
+          // indirect resource without further check).
+          const spec = ctx.grant.with?.[impl.id];
+          if (spec === undefined) return { ok: true };
+          if (typeof spec === "object" && spec !== null) validateSpec(spec);
+
+          const joined = (ctx as FetchCtx & { _indirectFetched?: Map<string, readonly unknown[]> })
+            ._indirectFetched?.get(impl.id) ?? [];
+          const passes = joined.some((d) => evaluateSpec(spec as Record<string, unknown>, d));
+          return passes
+            ? { ok: true }
+            : { ok: false, reason: `indirect[${impl.id}] no joined doc matches spec` };
+        },
       });
     },
   };

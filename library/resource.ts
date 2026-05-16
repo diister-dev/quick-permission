@@ -59,6 +59,25 @@ class ResourceImpl<T> implements Resource<T> {
     }::${JSON.stringify(ctx.grant.with ?? {})}`;
   }
 
+  cacheKeyForTarget(target: readonly unknown[]): string {
+    // Build a synthetic FetchCtx (target-only). For `preseed()`, the
+    // caller knows the target shape but neither subject nor grant. We
+    // assume `dedupKey` only reads `target` (the recommended pattern)
+    // — if a resource's dedupKey reaches into subject/grant, `preseed`
+    // will produce a key that won't match runtime `computeDedupKey`,
+    // and the cache will silently miss. Document this limit.
+    const syntheticCtx: FetchCtx = {
+      subject: { id: "__preseed__" },
+      target,
+      grant: { key: "__preseed__" },
+      capability: false,
+    };
+    if (this.dedupKey) return `${this.id}::${this.dedupKey(syntheticCtx)}`;
+    return `${this.id}::${syntheticCtx.subject.id}::${
+      JSON.stringify(target)
+    }::${JSON.stringify({})}`;
+  }
+
   // ─── Méthodes de sucre — toutes produites via defineRule ─────────────
 
   match(extractor?: (data: T) => unknown): Rule {
