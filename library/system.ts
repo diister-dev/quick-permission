@@ -17,6 +17,7 @@ import type {
   CanResult,
   FetchCtx,
   Grant,
+  IndirectResourceInfo,
   ListEntry,
   Permission,
   Resource,
@@ -92,6 +93,21 @@ export type System<TMeta = unknown> = {
   list(): readonly ListEntry<TMeta>[];
   tree(): { readonly children: Readonly<Record<string, TreeNode<TMeta>>> };
   schema(key: string): Permission<TMeta> | undefined;
+  /**
+   * Every distinct indirect resource referenced by the schema's rules,
+   * deduped by id. Returned in declaration-walk order (first-occurrence
+   * wins for dedup). Function fields are stripped — see
+   * `IndirectResourceInfo`. Empty if no permission uses `.match()` on an
+   * `indirectResource`.
+   */
+  indirectResources(): readonly IndirectResourceInfo[];
+  /**
+   * Indirect resources referenced by a single permission's rules.
+   * `[]` if `key` is unknown or has no `indirect-match` rule. Useful so
+   * matrix UIs only render the indirect-match editor on permissions where
+   * it has a semantic.
+   */
+  indirectsUsedBy(key: string): readonly IndirectResourceInfo[];
   /** Check direct (sans cache cross-can) — préfère `context()` en HTTP. */
   can(
     subject: Subject,
@@ -308,6 +324,34 @@ function serializeTarget(t: AnyTarget): SerializableTarget {
   }
 }
 
+function serializeIndirectResource(ir: IndirectResource): IndirectResourceInfo {
+  return {
+    id: ir.id,
+    kind: "indirect",
+    from: { id: ir.from.id, kind: ir.from.kind },
+    on: {
+      localField: ir.on.localField,
+      foreignField: ir.on.foreignField,
+      ...(ir.on.foreignCollection !== undefined && {
+        foreignCollection: ir.on.foreignCollection,
+      }),
+    },
+    ...(ir.to !== undefined && { to: { ...ir.to } }),
+    cardinality: ir.cardinality,
+  };
+}
+
+function collectIndirectsForPermission<TMeta>(
+  perm: Permission<TMeta>,
+): IndirectResource[] {
+  const collected = new Map<string, IndirectResource>();
+  for (const rule of perm.rules) {
+    const ir = extractIndirectResource(rule);
+    if (ir && !collected.has(ir.id)) collected.set(ir.id, ir);
+  }
+  return Array.from(collected.values());
+}
+
 /**
  * Build a wildcard target stub matching the schema's arity. Used to sample
  * `expandsTo(grant)` at catalog enumeration time — we don't have a real
@@ -493,6 +537,22 @@ export function createSystem<TMeta = unknown>(opts: {
 
     schema(key) {
       return schema[key];
+    },
+
+    indirectResources() {
+      const seen = new Map<string, IndirectResource>();
+      for (const perm of Object.values(schema)) {
+        for (const ir of collectIndirectsForPermission(perm)) {
+          if (!seen.has(ir.id)) seen.set(ir.id, ir);
+        }
+      }
+      return Array.from(seen.values()).map(serializeIndirectResource);
+    },
+
+    indirectsUsedBy(key) {
+      const perm = schema[key];
+      if (!perm) return [];
+      return collectIndirectsForPermission(perm).map(serializeIndirectResource);
     },
 
     can(subject, key, target, context) {

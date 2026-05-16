@@ -20,6 +20,7 @@ export type {
   FetchCtx,
   FilterContribution,
   Grant,
+  IndirectResourceInfo,
   ListEntry,
   Permission,
   Resource,

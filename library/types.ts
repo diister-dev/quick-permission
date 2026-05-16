@@ -331,6 +331,26 @@ export type SerializableSegment = {
   readonly types: string | readonly string[];
 };
 
+/**
+ * Serialized form of an `IndirectResource` — function fields stripped
+ * (`fetcher`, `cacheKeyForTarget`, `match` are runtime-only). Returned
+ * by `System.indirectResources()` and `System.indirectsUsedBy(key)` so
+ * matrix UIs / catalog endpoints can introspect joins without walking
+ * every permission's rules manually.
+ */
+export type IndirectResourceInfo = {
+  readonly id: string;
+  readonly kind: "indirect";
+  readonly from: { readonly id: string; readonly kind: "direct" | "indirect" };
+  readonly on: {
+    readonly localField: string;
+    readonly foreignField: string;
+    readonly foreignCollection?: string;
+  };
+  readonly to?: { readonly _type?: string };
+  readonly cardinality: "one" | "many";
+};
+
 export type SerializableTarget =
   | { readonly kind: "none" }
   | { readonly kind: "optional"; readonly segment: SerializableSegment }
