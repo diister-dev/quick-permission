@@ -20,7 +20,6 @@ import type {
   ListEntry,
   Permission,
   Resource,
-  Rule,
   SerializableSegment,
   SerializableTarget,
   Subject,
@@ -270,6 +269,87 @@ function serializeTarget(t: AnyTarget): SerializableTarget {
   }
 }
 
+/**
+ * Build a wildcard target stub matching the schema's arity. Used to sample
+ * `expandsTo(grant)` at catalog enumeration time — we don't have a real
+ * grant target available, but we need ARG_ARITY to match or `targetMatches`
+ * would drop the synthesized child grants (see `expandGrants:228-234`).
+ *
+ *  - none      → undefined (no segments)
+ *  - optional  → ["*"]
+ *  - required  → ["*"]
+ *  - path(n)   → ["*", "*", ..., "*"] (n segments)
+ */
+function stubTargetFor(t: AnyTarget): readonly unknown[] | undefined {
+  if (t.kind === "none") return undefined;
+  if (t.kind === "optional" || t.kind === "required") return ["*"];
+  return t.segments.map(() => "*");
+}
+
+// ─── Descendant computation (pour list/tree) ─────────────────────────────
+
+/**
+ * BFS transitive expansion of an intermediate's `expandsTo` callback,
+ * collecting LEAVES only (keys whose schema entry has no `expandsTo`).
+ *
+ * Sampling strategy : we call `perm.expandsTo({ key, target: <wildcard> })`
+ * with an arity-matched wildcard stub. Real consumers (`expandGrants`)
+ * call expandsTo with a concrete grant carrying `with`/`filter`/`flags` —
+ * but for catalog enumeration we only care about the resulting child KEYS
+ * (the same keys would be produced regardless of grant payload, since
+ * macros are by convention pure key-routers).
+ *
+ * Defensive : caught exceptions in `expandsTo` (e.g. a callback that
+ * asserts on a concrete segment) silently drop that branch — same posture
+ * as `validateSchema`. Cycles are broken by the `visited` set.
+ *
+ * Returns `undefined` if `rootKey` is a leaf or not in schema (the caller
+ * uses this signal to omit the field from the serialized entry rather
+ * than emit an empty array).
+ */
+function computeDescendants<TMeta>(
+  rootKey: string,
+  schema: Readonly<Record<string, Permission<TMeta>>>,
+  maxDepth = 10,
+): readonly string[] | undefined {
+  const root = schema[rootKey];
+  if (!root?.expandsTo) return undefined;
+
+  const leaves = new Set<string>();
+  const visited = new Set<string>([rootKey]);
+  const queue: Array<{ key: string; depth: number }> = [
+    { key: rootKey, depth: 0 },
+  ];
+
+  while (queue.length) {
+    const { key, depth } = queue.shift()!;
+    const perm = schema[key];
+    if (!perm) continue;
+    if (!perm.expandsTo) {
+      // Leaf reached. Exclude the root itself from its own descendant list.
+      if (key !== rootKey) leaves.add(key);
+      continue;
+    }
+    if (depth >= maxDepth) continue;
+    let children: readonly Grant[] = [];
+    try {
+      children = perm.expandsTo({
+        key,
+        target: stubTargetFor(perm.target),
+      });
+    } catch {
+      // Stub-throwing macro — best-effort skip, same as validateSchema.
+      continue;
+    }
+    for (const child of children) {
+      if (visited.has(child.key)) continue;
+      visited.add(child.key);
+      queue.push({ key: child.key, depth: depth + 1 });
+    }
+  }
+  return [...leaves];
+}
+
 // ─── Tree builder ────────────────────────────────────────────────────────
 
 function buildTree<TMeta>(
@@ -310,12 +390,16 @@ function buildTree<TMeta>(
       }
     }
     const leafName = parts[parts.length - 1];
+    const descendants = perm.expandsTo
+      ? computeDescendants(key, schema)
+      : undefined;
     cursor.children[leafName] = {
       kind: perm.expandsTo ? "intermediate" : "permission",
       key,
       metadata: perm.metadata,
       target: serializeTarget(perm.target),
       rules: perm.rules.map((r) => r.descriptor),
+      ...(descendants !== undefined && { expandsTo: descendants }),
     };
   }
 
@@ -333,13 +417,19 @@ export function createSystem<TMeta = unknown>(opts: {
 
   return {
     list() {
-      return Object.entries(schema).map(([key, perm]) => ({
-        key,
-        kind: perm.expandsTo ? "intermediate" as const : "permission" as const,
-        metadata: perm.metadata,
-        target: serializeTarget(perm.target),
-        rules: perm.rules.map((r) => r.descriptor),
-      }));
+      return Object.entries(schema).map(([key, perm]) => {
+        const descendants = perm.expandsTo
+          ? computeDescendants(key, schema)
+          : undefined;
+        return {
+          key,
+          kind: perm.expandsTo ? "intermediate" as const : "permission" as const,
+          metadata: perm.metadata,
+          target: serializeTarget(perm.target),
+          rules: perm.rules.map((r) => r.descriptor),
+          ...(descendants !== undefined && { expandsTo: descendants }),
+        };
+      });
     },
 
     tree() {

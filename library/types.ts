@@ -279,6 +279,13 @@ export interface Permission<TMeta = unknown> {
 
 /**
  * Résultat de `system.list()` : un entry plat par permission.
+ *
+ * `expandsTo` — pour les intermediates uniquement, contient la liste plate
+ * (leaves-only) des clés effectivement octroyées par cette macro, calculée
+ * par BFS transitive sur le schéma au moment du `list()`. Undefined pour
+ * `kind === "permission"` (les leaves n'expandent pas). Voir `system.ts:
+ * computeDescendants` pour la sémantique exacte (déduplication, cycle
+ * detection, leaves-only, sampling par stub wildcard).
  */
 export type ListEntry<TMeta = unknown> = {
   readonly key: string;
@@ -286,6 +293,7 @@ export type ListEntry<TMeta = unknown> = {
   readonly metadata: TMeta | undefined;
   readonly target: SerializableTarget;
   readonly rules: readonly RuleDescriptor[];
+  readonly expandsTo?: readonly string[];
 };
 
 /**
@@ -300,6 +308,7 @@ export type TreeNode<TMeta = unknown> =
     readonly metadata: TMeta | undefined;
     readonly target: SerializableTarget;
     readonly rules: readonly RuleDescriptor[];
+    readonly expandsTo?: readonly string[];
   }
   | {
     readonly kind: "group";
