@@ -75,7 +75,17 @@ class ResourceImpl<T> implements Resource<T> {
           validateSpec(spec);
         }
 
-        if (ctx.capability) {
+        // Cap-mode without fetched data: silent-pass + expose spec as
+        // constraint (legacy behaviour — pushdown to DB for resources
+        // that ARE the listed collection).
+        //
+        // When `data` is present in cap-mode it means the resource was
+        // fetched anyway (because `Resource.targetSegment` was concrete
+        // — see system.ts collection logic). In that case we evaluate
+        // the spec like in concrete mode and DON'T emit a constraint :
+        // the check is fully resolved and the (potentially inappropriate)
+        // constraint would pollute the listed collection's `find()`.
+        if (ctx.capability && data === undefined) {
           if (typeof spec === "object" && spec !== null && !Array.isArray(spec)) {
             return { ok: true, constraint: spec as Record<string, unknown> };
           }
@@ -92,7 +102,17 @@ class ResourceImpl<T> implements Resource<T> {
         if (!passes) {
           return { ok: false, reason: `match[${id}] mismatch` };
         }
-        return { ok: true, constraint: spec as Record<string, unknown> };
+        // Concrete mode (or cap-mode w/ fetched data): the rule resolved
+        // fully via `evaluateSpec`. Emitting `constraint: spec` here is
+        // safe ONLY when the resource id matches the listed collection
+        // — for foreign resources it would push a wrong filter. Conservative
+        // choice : emit only in legacy concrete mode (preserves existing
+        // listWithPermission semantics for self-referencing resources like
+        // `users.read` + `userOf.match`).
+        if (!ctx.capability) {
+          return { ok: true, constraint: spec as Record<string, unknown> };
+        }
+        return { ok: true };
       },
     });
   }

@@ -312,9 +312,15 @@ Deno.test("constraints: multiple match rules AND-merged within a grant", async (
   );
   assertEquals(r.ok, true);
   if (r.ok) {
-    assertEquals(r.constraints, {
-      $and: [{ _id: "exposition:e1" }, { status: "active" }],
-    });
+    // `expoOf` is auto-bound to segment 0 (id === "exposition" matches
+    // target.path's first segment name). In cap-mode with a concrete
+    // target[0]="exposition:e1", the engine fetches the exposition doc
+    // and `match.exposition` evaluates the spec normally (without
+    // emitting its constraint into the final pushdown — the check is
+    // already resolved).
+    // `badgeOf` is auto-bound to segment 1, but target[1]="badge:*" is
+    // wildcard → legacy silent-pass + emit `{ status: "active" }`.
+    assertEquals(r.constraints, { status: "active" });
   }
 });
 

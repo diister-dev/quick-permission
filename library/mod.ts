@@ -44,6 +44,14 @@ export type {
 // ─── Resource factory + sugar methods ────────────────────────────────────
 export { resource } from "./resource.ts";
 
+// ─── Indirect resource (JOIN-based, generates aggregation pipeline) ──────
+export { indirectResource } from "./indirect-resource.ts";
+export type {
+  IndirectResource,
+  IndirectResourceJoin,
+} from "./indirect-resource.ts";
+export type { AggregationStage } from "./indirect-aggregation.ts";
+
 // ─── defineRule + standalone helpers ─────────────────────────────────────
 export { defineRule, matchPath, requireSelf } from "./rules.ts";
 export type { DefineRuleOpts } from "./rules.ts";

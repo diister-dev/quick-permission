@@ -32,6 +32,13 @@ import {
   mergeFilterSpec,
   resolveFilteredData,
 } from "./aggregation.ts";
+import {
+  buildAggregationStages,
+} from "./indirect-aggregation.ts";
+import {
+  extractIndirectResource,
+  type IndirectResource,
+} from "./indirect-resource.ts";
 
 export type ProviderFn = (
   subject: Subject,
@@ -154,9 +161,16 @@ function asPath(value: unknown): readonly unknown[] {
  */
 function isCapabilityQuery(target: readonly unknown[] | undefined): boolean {
   if (!target) return false;
-  return target.some(
-    (seg) => seg === "*" || (typeof seg === "string" && seg.endsWith("*")),
-  );
+  return target.some(isWildcardSegment);
+}
+
+/**
+ * True if a single target segment is a wildcard (`"*"` or `"xxx:*"`).
+ * Inverse de "concret" — utilisé pour décider si une resource peut être
+ * fetchée en cap-mode (segment concret → fetch OK).
+ */
+function isWildcardSegment(seg: unknown): boolean {
+  return seg === "*" || (typeof seg === "string" && seg.endsWith("*"));
 }
 
 function segmentOverlaps(a: unknown, b: unknown): boolean {
@@ -583,6 +597,14 @@ export function createSystem<TMeta = unknown>(opts: {
     // no filter (= all fields). Else accumulates the union of filter specs.
     let referenceSource: unknown = undefined;
     let filterUnion: FilterUnion = undefined;
+    // Grants that PASSED their rules — needed by indirect-resource
+    // aggregation. `matching` contains all grants that match key + target
+    // shape, but rules can reject some (e.g. a `with` spec evaluated
+    // against an auto-fetched resource in cap-mode). The indirect
+    // orchestrator must consider only successful grants — otherwise a
+    // rejected grant without indirect reference would trigger any-wins
+    // and disable the filter.
+    const successfulGrants: Grant[] = [];
 
     for (const grant of matching) {
       const ctx: FetchCtx = {
@@ -599,13 +621,53 @@ export function createSystem<TMeta = unknown>(opts: {
         return r.needs.every((res) => res.isActiveFor(grant));
       });
 
-      const uniqueResources = capability ? [] : Array.from(
-        new Map(
-          activeRules
-            .flatMap((r) => r.needs)
-            .map((r) => [r.id, r] as const),
-        ).values(),
-      );
+      // In cap-mode the engine normally skips all fetches. Exception : a
+      // resource whose `id` matches a segment NAME of the permission's
+      // target AND whose corresponding segment in the request target is
+      // CONCRETE (not `*` / not `xxx:*`) is fetched anyway. This lets
+      // `match()` evaluate properly for foreign resources (auxiliary
+      // checks like "the request's exposition belongs to my tenant")
+      // when only one segment of a multi-segment target is wildcard.
+      //
+      // Auto-binding is by convention : `resource.id === segment.name`.
+      // No opt-in needed — it just works if the convention is respected.
+      // Resources whose id matches no segment in the permission's schema
+      // are skipped in cap-mode (silent-pass + constraint emit, the
+      // legacy behaviour that powers `users.read` + `userOf.match`
+      // self-referencing pushdown).
+      const requestTarget = target ?? [];
+      const targetSegmentIndexById = (() => {
+        const out = new Map<string, number>();
+        if (perm.target.kind === "none") return out;
+        const segments = perm.target.kind === "path"
+          ? perm.target.segments
+          : [perm.target.segments[0]];
+        segments.forEach((seg, i) => {
+          if (seg) out.set(seg.name, i);
+        });
+        return out;
+      })();
+      const uniqueResources = capability
+        ? Array.from(
+          new Map(
+            activeRules
+              .flatMap((r) => r.needs)
+              .filter((r) => {
+                const idx = targetSegmentIndexById.get(r.id);
+                if (idx === undefined) return false;
+                const seg = requestTarget[idx];
+                return seg !== undefined && !isWildcardSegment(seg);
+              })
+              .map((r) => [r.id, r] as const),
+          ).values(),
+        )
+        : Array.from(
+          new Map(
+            activeRules
+              .flatMap((r) => r.needs)
+              .map((r) => [r.id, r] as const),
+          ).values(),
+        );
       const fetched = new Map<string, unknown>();
       await Promise.all(uniqueResources.map(async (r) => {
         fetched.set(r.id, await fetchResource(r, ctx, state));
@@ -640,6 +702,7 @@ export function createSystem<TMeta = unknown>(opts: {
 
       if (grantOk) {
         anyOk = true;
+        successfulGrants.push(grant);
         if (grant.id) matchedGrantIds.push(grant.id);
         if (grantData !== undefined) lastData = grantData;
         const grantConstraint = combineGrantConstraints(grantConstraints);
@@ -661,10 +724,31 @@ export function createSystem<TMeta = unknown>(opts: {
     const constraints = aggregateConstraints(collectedConstraints);
     const finalData = resolveFilteredData(filterUnion, referenceSource, lastData);
 
+    // Collect indirect resources referenced by the permission's rules
+    // (sentinel rules with descriptor.kind === "indirect-match"). If any
+    // are referenced by matched grants' `with`, emit an aggregation
+    // pipeline that pushes the JOIN constraint to the DB.
+    const declaredIndirect: IndirectResource[] = [];
+    for (const rule of perm.rules) {
+      const ir = extractIndirectResource(rule);
+      if (ir) declaredIndirect.push(ir);
+    }
+    let stages: readonly Record<string, unknown>[] | undefined;
+    if (declaredIndirect.length > 0) {
+      const baseFilter = constraints ?? {};
+      // Must pass `successfulGrants` (rules accepted), NOT `matching`
+      // (raw key+target match). A grant rejected by a rule must not
+      // contribute to indirect any-wins — otherwise it would silently
+      // disable the indirect filter for its siblings.
+      const result = buildAggregationStages(baseFilter, successfulGrants, declaredIndirect);
+      if (result !== null) stages = result;
+    }
+
     return {
       ok: true,
       ...(finalData !== undefined ? { data: finalData } : {}),
       ...(constraints !== undefined ? { constraints } : {}),
+      ...(stages !== undefined ? { stages } : {}),
       ...(matchedGrantIds.length > 0
         ? { matchedGrants: matchedGrantIds }
         : {}),

@@ -346,6 +346,14 @@ export type CanResult =
     readonly ok: true;
     readonly data?: unknown;
     readonly constraints?: Record<string, unknown>;
+    /**
+     * Pipeline d'aggregation MongoDB produit quand au moins une
+     * `IndirectResource` est référencée dans les rules de la permission.
+     * Le consommateur (adapter mongodbee côté appli) choisit entre
+     * `find(constraints)` et `aggregate(stages)` selon la présence de
+     * `stages`. Cf. `indirect-aggregation.ts`.
+     */
+    readonly stages?: readonly Record<string, unknown>[];
     readonly matchedGrants?: readonly string[];
   }
   | { readonly ok: false; readonly reasons: readonly string[] };
