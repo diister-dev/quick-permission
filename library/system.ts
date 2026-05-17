@@ -87,6 +87,12 @@ export type CanContext = {
   readonly checkIp?: string;
   /** True : le target peut contenir des wildcards et matche les grants overlap. */
   readonly broadMatch?: boolean;
+  /**
+   * Check-time payload exposed to rules as `ctx.input`. Distinct from
+   * `grant.payload` (static, seed-time). Consumed by `inputMatch()` to
+   * validate a CREATE body against `grant.with`.
+   */
+  readonly input?: unknown;
 };
 
 export type System<TMeta = unknown> = {
@@ -122,7 +128,17 @@ export type System<TMeta = unknown> = {
   context(
     bound: { readonly subject: Subject } & CanContext,
   ): {
-    can(key: string, target?: readonly unknown[]): Promise<CanResult>;
+    /**
+     * `perCall` overrides the bound `CanContext` for this single check.
+     * Canonical use : passing `input` for a CREATE while keeping the
+     * shared (per-request) context. Other fields stay bound — override
+     * only when truly per-call.
+     */
+    can(
+      key: string,
+      target?: readonly unknown[],
+      perCall?: CanContext,
+    ): Promise<CanResult>;
     /**
      * Inject pre-loaded docs into the resource cache so subsequent
      * `can()` calls skip the fetch. Typical use : after a paginated
@@ -563,7 +579,7 @@ export function createSystem<TMeta = unknown>(opts: {
       const cache = new Map<string, Promise<unknown>>();
       const grantsCache = new Map<string, Promise<readonly Grant[]>>();
       const fetchCounters = new Map<string, number>();
-      const { subject, ...ctxOverrides } = bound;
+      const { subject, ...boundCtx } = bound;
       const resolveResource = (
         resourceOrId: Resource<unknown> | IndirectResource | string,
       ): Resource<unknown> | IndirectResource => {
@@ -578,8 +594,11 @@ export function createSystem<TMeta = unknown>(opts: {
         return r;
       };
       return {
-        can(key, target) {
-          return systemCan(subject, key, target, ctxOverrides, {
+        can(key, target, perCall) {
+          const ctx: CanContext = perCall
+            ? { ...boundCtx, ...perCall }
+            : boundCtx;
+          return systemCan(subject, key, target, ctx, {
             cache,
             grantsCache,
             fetchCounters,
@@ -737,6 +756,7 @@ export function createSystem<TMeta = unknown>(opts: {
         checkDate: context?.checkDate,
         checkIp: context?.checkIp,
         capability,
+        input: context?.input,
       };
 
       const activeRules = perm.rules.filter((r) => {

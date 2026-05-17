@@ -54,7 +54,7 @@ export type {
 export type { AggregationStage } from "./indirect-aggregation.ts";
 
 // ─── defineRule + standalone helpers ─────────────────────────────────────
-export { defineRule, matchPath, requireSelf } from "./rules.ts";
+export { defineRule, inputMatch, matchPath, requireSelf } from "./rules.ts";
 export type { DefineRuleOpts } from "./rules.ts";
 
 // ─── Permission builders ─────────────────────────────────────────────────

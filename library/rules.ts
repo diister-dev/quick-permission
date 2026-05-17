@@ -14,6 +14,7 @@ import type {
   Rule,
   RuleResult,
 } from "./types.ts";
+import { evaluateSpec, validateSpec } from "./mongo-query.ts";
 
 export type DefineRuleOpts<
   RS extends readonly Resource<unknown>[],
@@ -151,6 +152,51 @@ export function matchPath(opts: {
       if (typeof value !== "string") return { ok: true };
       if (value === "*" || value.endsWith("*")) return { ok: true };
       return { ok: true, constraint: { [field]: value } };
+    },
+  });
+}
+
+/**
+ * Validates `ctx.input` against `grant.inputWith` (Mongo spec). Distinct
+ * slot from `grant.with` so payload-shaped specs don't collide with
+ * resource-shaped specs in the same grant.
+ *
+ * Per-grant:
+ *  - no `inputWith`     → ok (unconditional grant)
+ *  - `inputWith` + input → `evaluateSpec(inputWith, input)`
+ *  - `inputWith` + no input → deny (cannot verify)
+ *
+ * Cross-grant OR aggregation: a single unconditional grant lets every check
+ * through (broadest wins); a UI capability check with no input only passes
+ * if at least one unconditional grant exists.
+ *
+ * @example
+ *   "invitations.create": permission({
+ *     target: target.path("exposition", "expo_organization"),
+ *   }).rules([inputMatch()])
+ *
+ *   { key: "invitations.create",
+ *     target: [expoId, orgId],
+ *     inputWith: { flowId: "flow:abc" } }
+ *
+ *   await ctx.can("invitations.create", [expoId, orgId], { input: body })
+ */
+export function inputMatch(): Rule {
+  return defineRule({
+    kind: "input-match",
+    needs: [] as const,
+    check: (_data, _payload, ctx) => {
+      const spec = ctx.grant.inputWith;
+      if (spec === undefined || Object.keys(spec).length === 0) {
+        return { ok: true };
+      }
+      if (ctx.input === undefined) {
+        return { ok: false, reason: "input-match: input required" };
+      }
+      validateSpec(spec);
+      return evaluateSpec(spec as Record<string, unknown>, ctx.input)
+        ? { ok: true }
+        : { ok: false, reason: "input-match: mismatch" };
     },
   });
 }

@@ -78,6 +78,12 @@ export type Grant = {
   readonly target?: readonly unknown[];
   /** Constraint specs lus par `match` / `includes`. */
   readonly with?: Readonly<Record<string, unknown>>;
+  /**
+   * Mongo spec read by `inputMatch()`, evaluated against `ctx.input`.
+   * Separate from `with` so payload-shaped specs don't collide with
+   * resource-shaped specs in the same grant.
+   */
+  readonly inputWith?: Readonly<Record<string, unknown>>;
   /** Sélecteurs de champs lus par `filter`. */
   readonly filter?: Readonly<Record<string, boolean>>;
   /** Opt-ins booléens lus par les `require*` rules. */
@@ -103,6 +109,12 @@ export type FetchCtx = {
    * ne peut pas être vérifiée sans ressource concrète.
    */
   readonly capability?: boolean;
+  /**
+   * Check-time payload (forwarded from `CanContext.input`). Distinct from
+   * `grant.payload` which is static (seed-time). Consumed by `inputMatch()`
+   * to validate a CREATE body against `grant.with`.
+   */
+  readonly input?: unknown;
 };
 
 /**
