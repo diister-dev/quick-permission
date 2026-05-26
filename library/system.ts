@@ -168,6 +168,8 @@ export type System<TMeta = unknown> = {
     getFetchCounters(): Readonly<Record<string, number>>;
     /** Reset des compteurs (pas du cache). */
     clearCounters(): void;
+    /** Dump des grants émis dans ce context (debug). */
+    dumpGrants(): Promise<readonly Grant[]>;
   };
 };
 
@@ -618,6 +620,10 @@ export function createSystem<TMeta = unknown>(opts: {
         },
         clearCounters() {
           fetchCounters.clear();
+        },
+        async dumpGrants() {
+          const arrays = await Promise.all(grantsCache.values());
+          return arrays.flat();
         },
       };
     },
