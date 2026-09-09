@@ -1,747 +1,249 @@
-# Quick Permission - Library 2
+# @diister/quick-permission
 
-A TypeScript permission management library that is **type-safe**, **flexible**, and **composable** with support for hierarchical permissions, field-level filtering, and metadata accumulation.
+Declarative, type-safe permissions that answer three questions at once: **may
+this subject act?**, **on which rows?**, and **which fields come back?**
 
-## 🎯 Key Features
+A check returns not just a yes or no, but the MongoDB constraints — and, when a
+rule reaches across collections, the aggregation pipeline — needed to enforce
+the same decision on a list query.
 
-### ✨ **Extreme Type Safety**
-```typescript
-// ✅ TypeScript enforces the correct argument type
-await permSystem.can(user, "article.read", articleId);  // Accepts ArticleId
-await permSystem.can(user, "article.create");           // Does not accept argument
+[![npm](https://img.shields.io/npm/v/@diister/quick-permission)](https://www.npmjs.com/package/@diister/quick-permission)
+[![JSR](https://jsr.io/badges/@diister/quick-permission)](https://jsr.io/@diister/quick-permission)
+[![License](https://img.shields.io/github/license/diister-dev/quick-permission)](LICENSE)
 
-// ✅ Output type is inferred automatically
-const result = await permSystem.can(user, "article.read", "article:1");
-result.output?.filter  // Type: Record<string, boolean> | undefined
-result.output?.data    // Type: any
+Runs on Bun, Node.js 20.11+ and Deno. No runtime dependencies.
+
+## Installation
+
+```bash
+# Bun / npm / pnpm / yarn
+bun add @diister/quick-permission
+
+# Deno
+deno add jsr:@diister/quick-permission
 ```
 
-### 🔥 **Field-Level Permissions with Accumulation**
-```typescript
-// Multiple permissions can contribute
-// Owner permission : { filter: { _id, title, owner, salary } }
-// Public permission : { filter: { _id, title, body } }
-// Contributor permission : { filter: { views } }
+## Quick start
 
-const result = await permSystem.can(ownerUser, "article.read", "article:1");
-// result.output.data = { _id, title, body, owner, salary, views }
-// ↑ Union of all filters!
-```
+A **resource** says how to load a document. A **permission** says what target it
+takes and which rules must hold. A **provider** says which grants a subject
+carries.
 
-### 🎪 **Recursive Intermediate Permissions**
-```typescript
-"article.manage": intermediate((ctx) => [
-  { ...ctx, key: "article.read" },
-  { ...ctx, key: "article.update" },
-  { ...ctx, key: "article.comment.manage", target: [ctx.target, "*"] }
-])
-
-// Recursive resolution with configurable max depth
-```
-
-### 🧩 **Providers + Rules Architecture**
-```typescript
-const permSystem = createPermissionSystem({
-  schemas: permissionsSchemas,
-  sources: [
-    directProvider(staticPerms),
-    ownerProvider(["article.read"], "article:*"),
-    customDatabaseProvider(),
-  ],
-  rules: [TimeRule(), IpRule(), WithRule()],
-});
-```
-
----
-
-## 📚 Usage Guide
-
-### Installation
-
-```typescript
+```ts
 import {
-  createPermissionSystem,
+  createSystem,
   permission,
-  intermediate,
-  FilterRule,
-  directProvider,
-  ownerProvider,
-} from "./library_2/mod.ts";
-```
+  resource,
+  target,
+} from "@diister/quick-permission";
 
-### 1. Define Permissions
+const userOf = resource({
+  id: "user",
+  fetch: ({ target }) => db.users.findOne({ _id: target[0] }),
+});
 
-```typescript
-import { permission, intermediate, FilterRule } from "./library_2/mod.ts";
-
-// Resource fetchers
-async function getArticle(id: string) {
-  return db.articles.findById(id);
-}
-
-async function getComment(ids: [string, string]) {
-  const [articleId, commentId] = ids;
-  return db.comments.findById(commentId, { articleId });
-}
-
-// Permission schemas
-const permissionsSchemas = {
-  // Simple permission
-  "article.create": permission(),
-
-  // Permission with context + field filtering
-  "article.read": permission(getArticle, [FilterRule()] as const),
-
-  // Permission with context but without rules
-  "article.update": permission(getArticle),
-
-  // Intermediate permission (expand to children)
-  "article.manage": intermediate(
-    (ctx) => [
-      { subject: ctx.subject, key: "article.read", target: ctx.target },
-      { subject: ctx.subject, key: "article.update", target: ctx.target },
-      { subject: ctx.subject, key: "article.delete", target: ctx.target },
-    ],
-    getArticle
-  ),
-
-  // Permission with nested context
-  "article.comment.delete": permission(getComment),
-};
-```
-
-### 2. Create Providers
-
-**Providers** are sources of permissions. They return the permissions for a subject.
-
-```typescript
-import { directProvider, ownerProvider } from "./library_2/mod.ts";
-import type { PermissionProvider } from "./library_2/mod.ts";
-
-// Provider 1: Static permissions
-const staticPerms = directProvider([
-  {
-    subject: adminUser,
-    key: "article.create",
+const sys = createSystem({
+  schema: {
+    "users.read": permission({ target: target.required("user") })
+      .rules([userOf.match()]),
   },
-  {
-    subject: moderatorUser,
-    key: "article.update",
-    target: "article:*",
-  },
-]);
-
-// Provider 2: Ownership-based permissions
-const ownerPerms = ownerProvider(
-  ["article.read", "article.update", "article.delete"],
-  "article:*",
-  {
-    filter: { _id: true, title: true, body: true, owner: true }
-  }
-);
-
-// Provider 3: Custom provider (e.g., from database)
-function databaseProvider(): PermissionProvider {
-  return {
-    provide: async (subject, _key, _target) => {
-      const userPerms = await db.permissions.find({ userId: subject.id });
-      return userPerms.map(p => ({
-        subject,
-        key: p.permissionKey,
-        target: p.target,
-        filter: p.filter,
-      }));
-    }
-  };
-}
-
-// Provider 4: Conditional provider
-function publicArticleProvider(): PermissionProvider {
-  return {
-    provide: (subject, _key, _target) => {
-      return Promise.resolve([
-        {
-          key: "article.read",
-          subject,
-          target: "*",
-          with: { public: true },  // Condition: article must be public
-          filter: { _id: true, title: true, body: true },
-        },
-      ]);
-    }
-  };
-}
-```
-
-### 3. Create the Permission System
-
-```typescript
-import { createPermissionSystem, TimeRule, IpRule, WithRule } from "./library_2/mod.ts";
-
-const permSystem = createPermissionSystem({
-  schemas: permissionsSchemas,
-
-  sources: [
-    staticPerms,
-    ownerPerms,
-    publicArticleProvider(),
-    databaseProvider(),
-  ],
-
-  // Global validation rules (applied to ALL permissions)
-  rules: [
-    TimeRule(),   // Validate time constraints (startDate, endDate)
-    IpRule(),     // Validate IP restrictions
-    WithRule(),   // Validate resource constraints
-  ] as const,
-
-  // Max depth for recursive intermediate resolution
-  maxIntermediateDepth: 10,
-});
-```
-
-### 4. Check Permissions
-
-```typescript
-const user = { id: "user:123" };
-
-// Permission without context
-const canCreate = await permSystem.can(user, "article.create");
-if (canCreate.ok) {
-  // User can create articles
-}
-
-// Permission with context (target)
-const canRead = await permSystem.can(user, "article.read", "article:1");
-if (canRead.ok) {
-  // User can read article:1
-  console.log("Allowed fields:", canRead.output?.filter);
-  console.log("Filtered data:", canRead.output?.data);
-}
-
-// Create a checker with shared context + cache
-const checker = permSystem.context({
-  subject: user,
-  checkDate: new Date("2024-01-01"),
-  ips: ["192.168.1.1"],
-});
-
-// All calls to checker.can() share the same cache!
-const r1 = await checker.can("article.read", "article:1");  // FETCH
-const r2 = await checker.can("article.update", "article:1"); // CACHE HIT
-const r3 = await checker.can("article.delete", "article:1"); // CACHE HIT
-```
-
----
-
-## 🧪 Complete Examples
-
-### Example 1: Blog with Field Filtering
-
-```typescript
-import { createPermissionSystem, permission, FilterRule, ownerProvider } from "./library_2/mod.ts";
-
-type Article = {
-  _id: string;
-  title: string;
-  body: string;
-  owner: string;
-  salary?: number;
-  secret?: string;
-};
-
-async function getArticle(id: string): Promise<Article | undefined> {
-  return db.articles.findById(id);
-}
-
-const schemas = {
-  "article.read": permission(getArticle, [FilterRule()] as const),
-};
-
-const permSystem = createPermissionSystem({
-  schemas,
-  sources: [
-    // Public users see basic fields
-    publicProvider({
-      filter: { _id: true, title: true, body: true }
-    }),
-
-    // Owners see more fields
-    ownerProvider(["article.read"], "article:*", {
-      filter: { _id: true, title: true, body: true, owner: true, salary: true }
-    }),
-
-    // Admins see everything
-    adminProvider({
-      filter: { _id: true, title: true, body: true, owner: true, salary: true, secret: true }
-    }),
+  providers: [
+    (subject) => grantsFor(subject), // [{ key: "users.read", target: ["user:abc"] }]
   ],
 });
 
-// Usage
-const result = await permSystem.can(publicUser, "article.read", "article:1");
-// result.output.data = { _id, title, body } ← filtered automatically
+const result = await sys
+  .context({ subject: { id: "user:caller" } })
+  .can("users.read", ["user:abc"]);
 
-const result2 = await permSystem.can(ownerUser, "article.read", "article:1");
-// result2.output.data = { _id, title, body, owner, salary } ← more fields
+result.ok; // true
 ```
 
-### Example 2: Hierarchical Permissions
+## Core concepts
 
-```typescript
-const schemas = {
-  "article.read": permission(getArticle),
-  "article.update": permission(getArticle),
-  "article.delete": permission(getArticle),
+### Targets
 
-  // Intermediate permission
-  "article.manage": intermediate(
-    (ctx) => [
-      { ...ctx, key: "article.read" },
-      { ...ctx, key: "article.update" },
-      { ...ctx, key: "article.delete" },
-    ],
-    getArticle
-  ),
-};
+A permission declares the shape of what it acts on. Targets are segment tuples,
+so `["user:abc"]` and `["org:1", "project:2"]` are both valid — for their
+respective declarations.
 
-const permSystem = createPermissionSystem({
-  schemas,
-  sources: [
-    directProvider([
-      { subject: admin, key: "article.manage", target: "*" }
-    ])
-  ],
+```ts
+target.required("user")        // exactly one user segment
+target.optional("user")        // the segment may be omitted
+target.none()                  // the permission acts on nothing in particular
+target.path("org", "project")  // a hierarchy
+```
+
+Grants may use `*` as a segment wildcard: a grant on `["user:*"]` matches any
+user.
+
+### Resources
+
+A resource is a named loader. The engine calls `fetch` at most once per distinct
+target within a check, and `dedupKey` lets you widen or narrow that sharing.
+
+```ts
+const postOf = resource({
+  id: "post",
+  fetch: ({ subject, target, grant }) => db.posts.findOne({ _id: target[0] }),
+  activeWhen: (grant) => grant.with?.post !== undefined, // skip when irrelevant
+  dedupKey: ({ target }) => String(target[0]),
 });
-
-// Admin has article.manage, which expands to read + update + delete
-const canRead = await permSystem.can(admin, "article.read", "article:1");
-// ✅ true (via article.manage)
-
-const canUpdate = await permSystem.can(admin, "article.update", "article:1");
-// ✅ true (via article.manage)
 ```
 
-### Example 3: Conditional Permissions
+### Rules
 
-```typescript
-import { WithRule } from "./library_2/mod.ts";
+Rules are what a permission checks. Every resource carries sugar methods for the
+common ones:
 
-const schemas = {
-  "article.read": permission(getArticle),
-};
+| Method | Holds when |
+| --- | --- |
+| `match(extract?)` | the fetched value equals the grant's constraint |
+| `filter(extract?)` | contributes a field filter rather than a verdict |
+| `includes(field, extract)` | the grant's `field` is in the extracted list |
+| `requireTruthy()` | the document exists and is truthy |
+| `requireOwner(get, { flag })` | the subject owns the document |
+| `requireMembership(get, { flag })` | the subject is in the extracted list |
+| `requireCustom(predicate, opts)` | your own predicate holds |
 
-const permSystem = createPermissionSystem({
-  schemas,
-  sources: [
-    // Only on public articles
-    {
-      provide: (subject) => Promise.resolve([{
-        subject,
-        key: "article.read",
-        target: "*",
-        with: { public: true },  // ← Condition
-      }])
-    },
+For anything else, `defineRule` is the primitive they are all built on:
 
-    // Only if user is author
-    {
-      provide: (subject) => Promise.resolve([{
-        subject,
-        key: "article.read",
-        target: "*",
-        with: { author: subject.id },  // ← Condition
-      }])
-    },
-  ],
-  rules: [WithRule()] as const,
+```ts
+import { defineRule } from "@diister/quick-permission";
+
+const isPublished = defineRule({
+  kind: "post.published",
+  needs: [postOf],
+  check: ([post]) =>
+    post?.status === "published"
+      ? true
+      : { ok: false, reason: "post is not published" },
 });
-
-// Only works if article.public === true OR article.author === user.id
 ```
 
-### Example 4: Resource Caching with `context()`
+`check` returns a boolean for a plain verdict, or `{ ok: false, reason }` when
+the caller deserves to know why.
 
-```typescript
-import { createPermissionSystem, permission, FilterRule } from "./library_2/mod.ts";
+### Providers
 
-const schemas = {
-  "article.read": permission(getArticle, [FilterRule()] as const),
-  "article.update": permission(getArticle),
-  "article.delete": permission(getArticle),
-};
+A provider turns a subject into grants. Several may be combined, and a subject
+is allowed when any single grant satisfies the permission's rules.
 
-const permSystem = createPermissionSystem({
-  schemas,
-  sources: [ownerProvider(["article.read", "article.update", "article.delete"], "article:*")],
-});
-
-// WITHOUT context(): each permission triggers a fetch
-await permSystem.can(user, "article.read", "article:1");   // FETCH #1
-await permSystem.can(user, "article.update", "article:1"); // FETCH #2
-await permSystem.can(user, "article.delete", "article:1"); // FETCH #3
-
-// WITH context(): cache is shared between all can()
-const checker = permSystem.context({ subject: user });
-await checker.can("article.read", "article:1");   // FETCH #1
-await checker.can("article.update", "article:1"); // CACHE HIT ✨
-await checker.can("article.delete", "article:1"); // CACHE HIT ✨
-
-// Cache also works in nested functions
-async function checkAllPermissions(checker, articleId: string) {
-  const canRead = await checker.can("article.read", articleId);   // CACHE HIT
-  const canUpdate = await checker.can("article.update", articleId); // CACHE HIT
-  return { canRead: canRead.ok, canUpdate: canUpdate.ok };
-}
-
-const perms = await checkAllPermissions(checker, "article:1");
-// ↑ No new fetch! Everything is cached
-```
-
-**Advantages of `context()`:**
-- ✅ Cache shared between all `can()` of the same checker
-- ✅ Custom context (dates, IPs, metadata) in all calls
-- ✅ Elegant API: `checker.can(key, target)` instead of `can(subject, key, target)`
-- ✅ No need for callbacks/closures (unlike AsyncContext)
-
----
-
-## 🏗️ Architecture
-
-### Validation Flow
-
-```
-1. permSystem.can(subject, key, target) or checker.can(key, target)
-   ↓
-2. Call all providers → [permissions]
-   ↓
-3. Resolve intermediates (recursive, max depth: 10) → [resolved permissions]
-   ↓
-4. Filter by key + target matching → [matched permissions]
-   ↓
-5. Apply global rules (Time, IP, With) → [valid permissions]
-   ↓
-6. Fetch resource (with cache if context()) ✨
-   ↓
-7. Apply output rules (FilterRule) → outputs
-   ↓
-8. Merge outputs (union strategy) → final output
-   ↓
-9. Return { ok: true, output }
-```
-
-**Note on caching**: Without `context()`, each `can()` creates its own local cache. With `context()`, all `can()` of the same checker share the same cache Map.
-
-### Components
-
-| Component | Role | Example |
-|-----------|------|---------|
-| **Permission** | Defines a permission with optional context | `permission(getArticle)` |
-| **Intermediate** | Permission that resolves to other permissions | `intermediate((ctx) => [...])` |
-| **Provider** | Source of permissions for a subject | `ownerProvider(...)` |
-| **Global Rule** | Global validation (applied to all permissions) | `TimeRule()`, `IpRule()` |
-| **Output Rule** | Generates metadata/output | `FilterRule()` |
-
----
-
-## 🎨 Advanced Patterns
-
-### Pattern 1: Multi-Tenant with Organizations
-
-```typescript
-const schemas = {
-  "org.member.read": permission(getOrgMember, [FilterRule()] as const),
-};
-
-function orgMemberProvider(): PermissionProvider {
-  return {
-    provide: async (subject, _key, _target) => {
-      // Get user's organizations
-      const orgs = await db.orgMembers.find({ userId: subject.id });
-
-      return orgs.map(org => ({
-        subject,
-        key: "org.member.read",
-        target: `org:${org.orgId}:member:*`,
-        filter: org.role === 'admin'
-          ? { _id: true, name: true, email: true, salary: true }
-          : { _id: true, name: true, email: true },
-      }));
-    }
-  };
-}
-```
-
-### Pattern 2: Rate Limiting
-
-```typescript
-function RateLimitRule(): OutputRule<
-  { rateLimit?: { max: number, window: string } }
-> {
-  return {
-    name: "rateLimit",
-    output: ({ state, currentOutput }) => {
-      const current = currentOutput?.rateLimit?.max || 0;
-      const incoming = state.rateLimit?.max || 0;
-
-      return {
-        rateLimit: {
-          max: Math.max(current, incoming),  // Most permissive
-          window: state.rateLimit?.window || "1h"
-        }
-      };
-    }
-  };
-}
-
-// Usage
-const schemas = {
-  "api.call": permission(undefined, [RateLimitRule()] as const),
-};
-
-const result = await permSystem.can(user, "api.call");
-// result.output.rateLimit = { max: 1000, window: "1h" }
-```
-
-### Pattern 3: Temporary Permissions
-
-```typescript
-import { TimeRule } from "./library_2/mod.ts";
-
-const permSystem = createPermissionSystem({
-  schemas,
-  sources: [
-    {
-      provide: (subject) => Promise.resolve([{
-        subject,
-        key: "article.read",
-        target: "article:1",
-        startDate: new Date("2024-01-01"),
-        endDate: new Date("2024-12-31"),
-      }])
-    }
-  ],
-  rules: [TimeRule()] as const,
-});
-
-// Only works between 2024-01-01 and 2024-12-31
-```
-
----
-
-## 🚀 Performance
-
-### Built-in Optimizations
-
-1. **Resource Caching**: With `context()`, cache is shared between all `can()` calls
-2. **Resource Fetching**: Resource is fetched **only once** per permission check
-3. **Short-Circuit**: Global rules stop validation as soon as one fails
-4. **Lazy Evaluation**: Intermediates are resolved only if necessary
-
-### Tips for Best Performance
-
-```typescript
-// ✅ GOOD: Put most restrictive rules first
-rules: [
-  IpRule(),      // Fast, filters many
-  WithRule(),    // May fetch resource
-  TimeRule(),    // Fast
-]
-
-// ❌ BAD: Everyone has access, providers are useless
-sources: [
-  alwaysAllowProvider(),  // ← Useless if you have this
-  ownerProvider(...),     // ← Never used
-]
-
-// ✅ GOOD: Specific provider
-sources: [
-  roleBasedProvider(),  // Return quickly if wrong role
-  ownerProvider(...),
+```ts
+providers: [
+  (subject) => db.grants.find({ userId: subject.id }).toArray(),
+  (subject) => (subject.isAdmin ? [{ key: "*", target: ["*"] }] : []),
 ]
 ```
 
----
+## Filtering lists, not just single documents
 
-## 🔧 API Reference
+This is what the library is really for. `can()` hands back the query fragments
+needed to apply the same decision to a list.
 
-### Core Functions
+```ts
+const result = await sys.context({ subject }).can("posts.list");
+if (!result.ok) return [];
 
-#### `createPermissionSystem<PS, TRules>(config)`
+const rows = result.stages
+  ? await db.posts.aggregate([...result.stages]).toArray()
+  : await db.posts.find(result.constraints ?? {}).toArray();
+```
 
-Creates a permission system.
+`constraints` is a plain MongoDB filter. `stages` appears instead when a rule
+reaches through an **indirect resource** — a join the engine has to express as
+an aggregation, because the deciding data lives in another collection.
 
-```typescript
-const permSystem = createPermissionSystem({
-  schemas: PermissionSchemas,
-  sources: PermissionProvider[],
-  rules?: readonly PermissionRule[],
-  maxIntermediateDepth?: number,
+```ts
+import { indirectResource } from "@diister/quick-permission";
+
+const membershipsOf = indirectResource({
+  id: "memberships_of_participant",
+  from: participantOf,
+  on: { localField: "_id", foreignField: "participantId" },
+  to: { _type: "org_membership" },
+  cardinality: "many",
 });
 ```
 
-#### `permission<C, TRules>(fetchTarget?, rules?)`
+Field-level filtering works the same way: `filter()` rules contribute a
+`FilterSpec`, and `applyFilter` applies it to a document.
 
-Creates a permission.
+```ts
+import { applyFilter } from "@diister/quick-permission";
 
-```typescript
-// No context, no rules
-permission()
-
-// With context
-permission<ArticleId>(getArticle)
-
-// With context + rules
-permission(getArticle, [FilterRule()] as const)
+const visible = applyFilter(post, result.data as FilterSpec);
 ```
 
-#### `intermediate<C, TRules>(provide, fetchTarget?, rules?)`
+## API reference
 
-Creates an intermediate permission.
+### `createSystem({ schema, providers })`
 
-```typescript
-intermediate(
-  (ctx) => [
-    { ...ctx, key: "article.read" },
-    { ...ctx, key: "article.update" },
-  ],
-  getArticle
-)
+Builds the engine. `schema` maps permission keys to `permission(...)`
+declarations; `providers` lists the grant sources. Returns a `System`:
+
+| Member | Purpose |
+| --- | --- |
+| `context({ subject })` | bind a subject; returns the surface below |
+| `can(key, target?)` | one-shot check without binding a context |
+| `list()` | every permission key with its metadata |
+| `tree()` | the same, as a hierarchy |
+| `schema` | the declaration you passed in |
+| `indirectResources()` | every indirect resource reachable from the schema |
+| `indirectsUsedBy(key)` | those a given permission depends on |
+
+### `context({ subject })`
+
+| Member | Purpose |
+| --- | --- |
+| `can(key, target?)` | run a check; resource fetches are deduplicated across it |
+| `preseed(resourceOrId, target, value)` | supply a document you already hold |
+| `getFetchCounters()` | how many times each resource was fetched |
+| `clearCounters()` | reset those counters |
+| `dumpGrants()` | the grants the providers returned, for debugging |
+
+`preseed` is worth knowing: when the caller already has the document in hand,
+seeding it skips the fetch entirely.
+
+### The result of `can()`
+
+```ts
+type CanResult =
+  | {
+      ok: true;
+      data?: unknown;                              // filter spec, when filter() rules ran
+      constraints?: Record<string, unknown>;       // MongoDB filter for list queries
+      stages?: readonly Record<string, unknown>[]; // aggregation, for indirect rules
+      matchedGrants?: readonly string[];
+    }
+  | { ok: false /* … */ };
 ```
 
-### Permission System Methods
+### Other exports
 
-#### `permSystem.can<K>(subject, key, ...target?)`
+`permission`, `resource`, `defineRule`, `indirectResource`, `target`, `seg`,
+`applyFilter`, `inputMatch`, `intermediate`, `matchPath`, `pickFields`,
+`requireSelf`, and the types they use.
 
-Checks a permission for a given subject.
+## Development
 
-```typescript
-// Without target
-await permSystem.can(user, "article.create")
-
-// With target
-await permSystem.can(user, "article.read", "article:1")
-
-// Return
-type PermissionResult<TOutput> = {
-  ok: boolean;
-  output?: TOutput;  // Type inferred from rules
-}
+```bash
+bun install
+bun test          # 184 tests
+bun run check     # tsc
+bun run lint      # biome
+bun run build     # dist/ for npm
 ```
 
-#### `permSystem.context(ctx)`
+The suite targets `node:test`, so it runs unchanged under `bun test`,
+`node --test` and `deno test` — worth it, because Bun runs JavaScriptCore while
+Node and Deno run V8. Five cases need a MongoDB on `localhost:27017`; set
+`MONGO_URL` to point elsewhere.
 
-Creates a checker with shared context and cache.
+`sift/` is vendored from [sift.js](https://github.com/crcn/sift.js) (MIT) with
+the `$where` operator removed, and is excluded from lint and formatting so
+re-vendoring stays a clean diff.
 
-```typescript
-const checker = permSystem.context({
-  subject: user,           // Required
-  checkDate: new Date(),   // Optional (for TimeRule)
-  ips: ["192.168.1.1"],   // Optional (for IpRule)
-  // ... other custom properties
-});
+## License
 
-// All can() of the checker share the same cache
-await checker.can("article.read", "article:1");   // FETCH
-await checker.can("article.update", "article:1"); // CACHE HIT
-```
-
-**Return**: `{ can<K>(key, ...target?) => Promise<PermissionResult<...>> }`
-
-### Built-in Providers
-
-#### `directProvider(permissions)`
-
-Provider with static permissions.
-
-```typescript
-directProvider([
-  { subject: user1, key: "article.create" },
-  { subject: user2, key: "article.read", target: "article:*" },
-])
-```
-
-#### `ownerProvider(keys, targetPattern, metadata?)`
-
-Ownership-based provider.
-
-```typescript
-ownerProvider(
-  ["article.read", "article.update"],
-  "article:*",
-  { filter: { _id: true, title: true } }
-)
-```
-
-### Built-in Rules
-
-#### Global Rules
-
-- `TimeRule()`: Validates time constraints (`startDate`, `endDate`)
-- `IpRule()`: Validates IP restrictions (`allowedIps`)
-- `WithRule()`: Validates resource constraints (`with`)
-
-#### Output Rules
-
-- `FilterRule()`: Applies field-level filtering
-
-### Utilities
-
-#### `matchPath(requested, pattern)`
-
-Matches a path with wildcards.
-
-```typescript
-matchPath("article:123", "article:*")  // true
-matchPath(["article:1", "comment:2"], ["article:*", "*"])  // true
-```
-
-#### `applyFilter(obj, filterSpec)`
-
-Applies a filter to an object.
-
-```typescript
-applyFilter(
-  { _id: 1, name: "John", password: "secret" },
-  { _id: true, name: true }
-)
-// → { _id: 1, name: "John" }
-```
-
-#### `mergeFilters(filter1, filter2)`
-
-Merges two filters (union).
-
-```typescript
-mergeFilters(
-  { _id: true, name: true },
-  { name: true, email: true }
-)
-// → { _id: true, name: true, email: true }
-```
-
----
-
-## 🆚 Comparison with Other Libraries
-
-| Feature | CASL | Casbin | **Library_2** |
-|---------|------|--------|---------------|
-| Type Safety | ⭐⭐⭐ | ⭐ | ⭐⭐⭐⭐⭐ |
-| Field-level permissions | ⭐⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐⭐⭐ |
-| Auto-filtering | ❌ | ❌ | ✅ |
-| Multi-permission accumulation | ❌ | ❌ | ✅ |
-| Output metadata | ⭐⭐ | ⭐ | ⭐⭐⭐⭐⭐ |
-| Hierarchical permissions | ⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
-| Flexible providers | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
-
----
-
-## 📝 License
-
-MIT
-
----
-
-## 🤝 Contributing
-
-Contributions welcome! See examples in `/playground` for usage patterns.
+MIT — see [LICENSE](LICENSE).
