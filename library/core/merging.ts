@@ -19,7 +19,7 @@ export interface FilterSpec {
  */
 export function mergeFilters(
   current: FilterSpec | undefined,
-  incoming: FilterSpec | undefined
+  incoming: FilterSpec | undefined,
 ): FilterSpec {
   if (!current) return incoming || {};
   if (!incoming) return current;
@@ -27,12 +27,15 @@ export function mergeFilters(
   const result: FilterSpec = { ...current };
 
   for (const [key, value] of Object.entries(incoming)) {
-    if (typeof value === 'boolean' && typeof result[key] === 'boolean') {
+    if (typeof value === "boolean" && typeof result[key] === "boolean") {
       // Union: if either says true, it's true
       result[key] = result[key] || value;
-    } else if (typeof value === 'object' && typeof result[key] === 'object') {
+    } else if (typeof value === "object" && typeof result[key] === "object") {
       // Recursive merge for nested filters
-      result[key] = mergeFilters(result[key] as FilterSpec, value as FilterSpec);
+      result[key] = mergeFilters(
+        result[key] as FilterSpec,
+        value as FilterSpec,
+      );
     } else if (!(key in result)) {
       // New key, add it
       result[key] = value;
@@ -46,41 +49,67 @@ export function mergeFilters(
 }
 
 /**
- * Merge two values based on the key type
+ * Merge two values using the "most permissive" strategy, recursing down to
+ * the leaves of nested structures.
+ *
+ * Strategies (applied at each leaf):
+ * - filter / updateFilter / writeFilter: union via mergeFilters
+ * - arrays: concat + dedup (set union)
+ * - numbers: Math.max (largest grant wins)
+ * - booleans: OR (true wins)
+ * - Date: latest wins
+ * - plain objects: recurse field-by-field with the same strategy
+ * - everything else (string, mismatched types, null): incoming wins
+ *
+ * Recursive object handling fixes the previous `{ ...current, ...incoming }`
+ * shortcut which made nested merges depend on insertion order rather than
+ * value semantics.
  */
 function mergeValue(key: string, current: any, incoming: any): any {
-  // For "filter" and "updateFilter": Union (more permissive)
-  if (key === 'filter' || key === 'updateFilter') {
+  // Filter-style fields are unions of allowed fields, regardless of nesting depth
+  if (key === "filter" || key === "updateFilter" || key === "writeFilter") {
     return mergeFilters(current, incoming);
   }
 
-  // For "data": Deep merge of objects
-  if (key === 'data') {
-    if (typeof current === 'object' && typeof incoming === 'object' &&
-        !Array.isArray(current) && !Array.isArray(incoming)) {
-      return { ...current, ...incoming };
-    }
-    return incoming; // Replace if different types
-  }
-
-  // For arrays: Concat and deduplicate
+  // Arrays: union with dedup
   if (Array.isArray(current) && Array.isArray(incoming)) {
     return [...new Set([...current, ...incoming])];
   }
 
-  // For numbers: Max (more permissive)
-  if (typeof current === 'number' && typeof incoming === 'number') {
+  // Numbers: most permissive = largest
+  if (typeof current === "number" && typeof incoming === "number") {
     return Math.max(current, incoming);
   }
 
-  // For objects: Deep merge
-  if (typeof current === 'object' && typeof incoming === 'object' &&
-      current !== null && incoming !== null &&
-      !Array.isArray(current) && !Array.isArray(incoming)) {
-    return { ...current, ...incoming };
+  // Booleans: most permissive = OR
+  if (typeof current === "boolean" && typeof incoming === "boolean") {
+    return current || incoming;
   }
 
-  // Default: incoming wins (last wins)
+  // Dates: most permissive = latest
+  if (current instanceof Date && incoming instanceof Date) {
+    return new Date(Math.max(current.getTime(), incoming.getTime()));
+  }
+
+  // Plain objects: recurse field-by-field
+  if (
+    typeof current === "object" &&
+    typeof incoming === "object" &&
+    current !== null &&
+    incoming !== null &&
+    !Array.isArray(current) &&
+    !Array.isArray(incoming) &&
+    !(current instanceof Date) &&
+    !(incoming instanceof Date)
+  ) {
+    const result: Record<string, any> = { ...current };
+    for (const [k, v] of Object.entries(incoming)) {
+      result[k] = k in current ? mergeValue(k, current[k], v) : v;
+    }
+    return result;
+  }
+
+  // Type mismatch or primitive: incoming wins
   return incoming;
 }
 

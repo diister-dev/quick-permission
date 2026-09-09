@@ -1,44 +1,81 @@
 /**
- * Quick Permission - Type-safe permission system
+ * `@diister/quick-permission` — API publique.
  *
- * @module
+ * Expose une primitive unique `defineRule({ needs, check })` autour de
+ * laquelle sont organisés les `Resource`, méthodes de sucre, et le moteur
+ * d'orchestration avec dedup par contexte.
+ *
+ * Cf. `docs/rfc-resource-pipe-api.md` pour la motivation, les décisions
+ * de design et le plan de migration.
  */
 
-// Core
-export { createPermissionSystem } from "./core/permission.ts";
-export { matchPath } from "./core/matching.ts";
+// ─── Targets ─────────────────────────────────────────────────────────────
+export { seg, target } from "./target.ts";
+
+// ─── Core types ──────────────────────────────────────────────────────────
 export type {
-  Subject,
+  AnySegment,
+  AnyTarget,
+  CanResult,
+  FetchCtx,
+  FilterContribution,
+  Grant,
+  IndirectResourceInfo,
+  ListEntry,
   Permission,
-  IntermediatePermission,
-  PermissionDefinition,
-  PermissionSchemas,
-  PermissionProvider,
-  PermissionRule,
-  PermissionStateBase,
-  PermissionResult,
-  PermissionSystemConfig,
-  MergeRequestContexts,
-  ExtractPermissionOutput,
-  ExtractRuleOutput,
-  MergeRuleOutputs,
-  ContextArgs,
-} from "./core/types.ts";
+  Resource,
+  ResourceData,
+  ResourcesData,
+  Rule,
+  RuleDescriptor,
+  RuleResult,
+  SegmentSpec,
+  SerializableSegment,
+  SerializableTarget,
+  SpecToSegment,
+  Subject,
+  TargetArgs,
+  TargetNone,
+  TargetOptional,
+  TargetPath,
+  TargetRequired,
+  TreeNode,
+} from "./types.ts";
 
-// Helpers
-export { permission, intermediate } from "./helpers/builders.ts";
+// ─── Resource factory + sugar methods ────────────────────────────────────
+export { resource } from "./resource.ts";
 
-// Providers
-export { directProvider } from "./providers/direct.ts";
-export { ownerProvider } from "./providers/owner.ts";
+// ─── Indirect resource (JOIN-based, generates aggregation pipeline) ──────
+export { indirectResource } from "./indirect-resource.ts";
+export type {
+  IndirectResource,
+  IndirectResourceJoin,
+} from "./indirect-resource.ts";
+export type { AggregationStage } from "./indirect-aggregation.ts";
 
-// Rules
-export { TimeRule } from "./rules/time.ts";
-export { IpRule } from "./rules/ip.ts";
-export { WithRule } from "./rules/with.ts";
-export { FilterRule } from "./rules/filter.ts";
+// ─── defineRule + standalone helpers ─────────────────────────────────────
+export { defineRule, inputMatch, matchPath, requireSelf } from "./rules.ts";
+export type { DefineRuleOpts } from "./rules.ts";
 
-// Utilities
+// ─── Permission builders ─────────────────────────────────────────────────
+export { intermediate, permission } from "./permission.ts";
+export type {
+  IntermediateBuilder,
+  IntermediateConfig,
+  PermissionBuilder,
+  PermissionConfig,
+} from "./permission.ts";
+
+// ─── System ──────────────────────────────────────────────────────────────
+export { createSystem } from "./system.ts";
+export type {
+  CanContext,
+  Provider,
+  ProviderFn,
+  ProviderObject,
+  System,
+} from "./system.ts";
+
+// ─── Field-projection helpers (used outside permission checks too) ───────
 export { applyFilter, pickFields } from "./core/filtering.ts";
-export { mergeFilters, mergeOutputs } from "./core/merging.ts";
 export type { FilterSpec } from "./core/merging.ts";

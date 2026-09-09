@@ -26,13 +26,13 @@ import type { FilterSpec } from "./merging.ts";
  * // → { user: { name: "John" } }
  */
 export function applyFilter(obj: any, filterSpec: FilterSpec): any {
-  if (!obj || typeof obj !== 'object') {
+  if (!obj || typeof obj !== "object") {
     return obj;
   }
 
   // Handle arrays
   if (Array.isArray(obj)) {
-    return obj.map(item => applyFilter(item, filterSpec));
+    return obj.map((item) => applyFilter(item, filterSpec));
   }
 
   const result: any = {};
@@ -46,7 +46,7 @@ export function applyFilter(obj: any, filterSpec: FilterSpec): any {
     } else if (spec === false) {
       // Exclude field
       continue;
-    } else if (typeof spec === 'object') {
+    } else if (typeof spec === "object") {
       // Nested filter
       result[key] = applyFilter(obj[key], spec);
     }
@@ -64,7 +64,7 @@ export function applyFilter(obj: any, filterSpec: FilterSpec): any {
  */
 export function pickFields<T extends Record<string, any>>(
   obj: T,
-  fields: Record<string, boolean>
+  fields: Record<string, boolean>,
 ): Partial<T> {
   return applyFilter(obj, fields);
 }

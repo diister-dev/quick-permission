@@ -1,0 +1,58 @@
+{
+  "name": "@diister/quick-permission",
+  "version": "0.9.0-beta.5",
+  "description": "Declarative, type-safe permission rules with MongoDB query generation",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "keywords": [
+    "permissions",
+    "authorization",
+    "access-control",
+    "mongodb",
+    "typescript"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diister-dev/quick-permission.git",
+    "directory": "library"
+  },
+  "homepage": "https://github.com/diister-dev/quick-permission#readme",
+  "bugs": "https://github.com/diister-dev/quick-permission/issues",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "files": [
+    "dist",
+    "core",
+    "sift",
+    "*.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/mod.d.ts",
+      "default": "./dist/mod.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.12",
+    "@types/bun": "^1.4.1",
+    "@types/node": "^22.15.0",
+    "mongodb": "^6.21.0",
+    "typescript": "^5.9.3"
+  },
+  "scripts": {
+    "check:package": "bun run scripts/check-package.ts",
+    "version:set": "bun run scripts/check-package.ts --write",
+    "prebuild": "bun run check:package",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "lint": "biome lint .",
+    "fmt": "biome format --write .",
+    "fmt:check": "biome format .",
+    "test": "bun test"
+  }
+}
