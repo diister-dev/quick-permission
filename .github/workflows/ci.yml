@@ -55,6 +55,16 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # `indirect_resource_mongo_test.ts` talks to a real MongoDB. It never ran
+      # before — `deno test library/` had no `--allow-env`, so the file died on
+      # reading MONGO_URL and its five cases were silently skipped. A standalone
+      # is enough: the tests only insertMany and aggregate, no transactions.
+      - name: Start MongoDB
+        uses: supercharge/mongodb-github-action@1.12.0
+        with:
+          mongodb-version: '6.0'
+          mongodb-port: 27017
+
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
