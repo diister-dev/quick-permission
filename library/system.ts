@@ -33,9 +33,7 @@ import {
   mergeFilterSpec,
   resolveFilteredData,
 } from "./aggregation.ts";
-import {
-  buildAggregationStages,
-} from "./indirect-aggregation.ts";
+import { buildAggregationStages } from "./indirect-aggregation.ts";
 import {
   extractIndirectResource,
   type IndirectResource,
@@ -125,9 +123,7 @@ export type System<TMeta = unknown> = {
    * Crée un context request-scoped avec cache de fetches partagé entre
    * tous les `can()` qui en découlent.
    */
-  context(
-    bound: { readonly subject: Subject } & CanContext,
-  ): {
+  context(bound: { readonly subject: Subject } & CanContext): {
     /**
      * `perCall` overrides the bound `CanContext` for this single check.
      * Canonical use : passing `input` for a CREATE while keeping the
@@ -200,9 +196,7 @@ function validateSchema<TMeta>(
     }
   }
   if (issues.length > 0) {
-    throw new Error(
-      `Schema validation failed:\n  - ${issues.join("\n  - ")}`,
-    );
+    throw new Error(`Schema validation failed:\n  - ${issues.join("\n  - ")}`);
   }
 }
 
@@ -271,8 +265,10 @@ function targetMatches(
     if (seg === "*") return true;
     if (typeof seg === "string" && seg.endsWith("*")) {
       const prefix = seg.slice(0, -1);
-      return typeof requestTarget[i] === "string" &&
-        (requestTarget[i] as string).startsWith(prefix);
+      return (
+        typeof requestTarget[i] === "string" &&
+        (requestTarget[i] as string).startsWith(prefix)
+      );
     }
     return seg === requestTarget[i];
   });
@@ -487,7 +483,11 @@ function buildTree<TMeta>(
         cursor.children[parts[i]] = newGroup;
         cursor = newGroup;
       } else {
-        cursor = node as { kind: "group"; metadata: undefined; children: Record<string, TreeNode<TMeta>> };
+        cursor = node as {
+          kind: "group";
+          metadata: undefined;
+          children: Record<string, TreeNode<TMeta>>;
+        };
       }
     }
     const leafName = parts[parts.length - 1];
@@ -521,7 +521,10 @@ export function createSystem<TMeta = unknown>(opts: {
   // to look up the resource by id — callers don't need to import the
   // resource instance (handy when it lives inside a factory closure).
   // Typo guard : throws with the list of available ids when missed.
-  const resourceRegistry = new Map<string, Resource<unknown> | IndirectResource>();
+  const resourceRegistry = new Map<
+    string,
+    Resource<unknown> | IndirectResource
+  >();
   for (const perm of Object.values(schema)) {
     for (const rule of perm.rules) {
       for (const r of rule.needs) {
@@ -540,7 +543,9 @@ export function createSystem<TMeta = unknown>(opts: {
           : undefined;
         return {
           key,
-          kind: perm.expandsTo ? "intermediate" as const : "permission" as const,
+          kind: perm.expandsTo
+            ? ("intermediate" as const)
+            : ("permission" as const),
           metadata: perm.metadata,
           target: serializeTarget(perm.target),
           rules: perm.rules.map((r) => r.descriptor),
@@ -683,7 +688,10 @@ export function createSystem<TMeta = unknown>(opts: {
     return pending;
   }
 
-  function validateArity(perm: Permission<TMeta>, target: readonly unknown[] | undefined): string | null {
+  function validateArity(
+    perm: Permission<TMeta>,
+    target: readonly unknown[] | undefined,
+  ): string | null {
     const expected = perm.target.segments.length;
     const actual = target?.length ?? 0;
     if (perm.target.kind === "none") {
@@ -720,16 +728,23 @@ export function createSystem<TMeta = unknown>(opts: {
     // Collect grants depuis les providers (en série pour préserver l'ordre)
     const allGrants: Grant[] = [];
     for (const provider of providers) {
-      const grants = await invokeProvider(provider, subject, key, target, state);
+      const grants = await invokeProvider(
+        provider,
+        subject,
+        key,
+        target,
+        state,
+      );
       allGrants.push(...grants);
     }
 
     const expanded = expandGrants(allGrants, schema);
 
     const capability = isCapabilityQuery(target);
-    const matching = expanded.filter((g) =>
-      g.key === key &&
-      targetMatches(g.target, target, perm.target.kind, capability)
+    const matching = expanded.filter(
+      (g) =>
+        g.key === key &&
+        targetMatches(g.target, target, perm.target.kind, capability),
     );
     if (matching.length === 0) {
       return { ok: false, reasons: ["no matching grant"] };
@@ -788,9 +803,10 @@ export function createSystem<TMeta = unknown>(opts: {
       const targetSegmentIndexById = (() => {
         const out = new Map<string, number>();
         if (perm.target.kind === "none") return out;
-        const segments = perm.target.kind === "path"
-          ? perm.target.segments
-          : [perm.target.segments[0]];
+        const segments =
+          perm.target.kind === "path"
+            ? perm.target.segments
+            : [perm.target.segments[0]];
         segments.forEach((seg, i) => {
           if (seg) out.set(seg.name, i);
         });
@@ -798,29 +814,31 @@ export function createSystem<TMeta = unknown>(opts: {
       })();
       const uniqueResources = capability
         ? Array.from(
-          new Map(
-            activeRules
-              .flatMap((r) => r.needs)
-              .filter((r) => {
-                const idx = targetSegmentIndexById.get(r.id);
-                if (idx === undefined) return false;
-                const seg = requestTarget[idx];
-                return seg !== undefined && !isWildcardSegment(seg);
-              })
-              .map((r) => [r.id, r] as const),
-          ).values(),
-        )
+            new Map(
+              activeRules
+                .flatMap((r) => r.needs)
+                .filter((r) => {
+                  const idx = targetSegmentIndexById.get(r.id);
+                  if (idx === undefined) return false;
+                  const seg = requestTarget[idx];
+                  return seg !== undefined && !isWildcardSegment(seg);
+                })
+                .map((r) => [r.id, r] as const),
+            ).values(),
+          )
         : Array.from(
-          new Map(
-            activeRules
-              .flatMap((r) => r.needs)
-              .map((r) => [r.id, r] as const),
-          ).values(),
-        );
+            new Map(
+              activeRules
+                .flatMap((r) => r.needs)
+                .map((r) => [r.id, r] as const),
+            ).values(),
+          );
       const fetched = new Map<string, unknown>();
-      await Promise.all(uniqueResources.map(async (r) => {
-        fetched.set(r.id, await fetchResource(r, ctx, state));
-      }));
+      await Promise.all(
+        uniqueResources.map(async (r) => {
+          fetched.set(r.id, await fetchResource(r, ctx, state));
+        }),
+      );
 
       // In concrete mode, indirect resources that declared a `fetcher`
       // are fetched as well (their joined docs are attached to the ctx
@@ -832,24 +850,32 @@ export function createSystem<TMeta = unknown>(opts: {
       if (!capability) {
         const indirectsToFetch = perm.rules
           .map((r) => extractIndirectResource(r))
-          .filter((ir): ir is IndirectResource => ir !== null && ir.fetcher !== undefined);
-        await Promise.all(indirectsToFetch.map(async (ir) => {
-          const sourceDoc = fetched.get(ir.from.id);
-          if (sourceDoc === undefined || sourceDoc === null) return;
-          const cacheKey = ir.cacheKeyForTarget(ctx.target);
-          if (state) {
-            const existing = state.cache.get(cacheKey);
-            if (existing) {
-              indirectFetched.set(ir.id, (await existing) as readonly unknown[]);
-              return;
+          .filter(
+            (ir): ir is IndirectResource =>
+              ir !== null && ir.fetcher !== undefined,
+          );
+        await Promise.all(
+          indirectsToFetch.map(async (ir) => {
+            const sourceDoc = fetched.get(ir.from.id);
+            if (sourceDoc === undefined || sourceDoc === null) return;
+            const cacheKey = ir.cacheKeyForTarget(ctx.target);
+            if (state) {
+              const existing = state.cache.get(cacheKey);
+              if (existing) {
+                indirectFetched.set(
+                  ir.id,
+                  (await existing) as readonly unknown[],
+                );
+                return;
+              }
+              const pending = Promise.resolve(ir.fetcher!(sourceDoc, ctx));
+              state.cache.set(cacheKey, pending);
+              indirectFetched.set(ir.id, await pending);
+            } else {
+              indirectFetched.set(ir.id, await ir.fetcher!(sourceDoc, ctx));
             }
-            const pending = Promise.resolve(ir.fetcher!(sourceDoc, ctx));
-            state.cache.set(cacheKey, pending);
-            indirectFetched.set(ir.id, await pending);
-          } else {
-            indirectFetched.set(ir.id, await ir.fetcher!(sourceDoc, ctx));
-          }
-        }));
+          }),
+        );
       }
 
       // Attach indirect-fetched joined docs to the context so
@@ -907,7 +933,11 @@ export function createSystem<TMeta = unknown>(opts: {
     }
 
     const constraints = aggregateConstraints(collectedConstraints);
-    const finalData = resolveFilteredData(filterUnion, referenceSource, lastData);
+    const finalData = resolveFilteredData(
+      filterUnion,
+      referenceSource,
+      lastData,
+    );
 
     // Collect indirect resources referenced by the permission's rules
     // (sentinel rules with descriptor.kind === "indirect-match"). If any
@@ -925,7 +955,11 @@ export function createSystem<TMeta = unknown>(opts: {
       // (raw key+target match). A grant rejected by a rule must not
       // contribute to indirect any-wins — otherwise it would silently
       // disable the indirect filter for its siblings.
-      const result = buildAggregationStages(baseFilter, successfulGrants, declaredIndirect);
+      const result = buildAggregationStages(
+        baseFilter,
+        successfulGrants,
+        declaredIndirect,
+      );
       if (result !== null) stages = result;
     }
 
@@ -934,9 +968,7 @@ export function createSystem<TMeta = unknown>(opts: {
       ...(finalData !== undefined ? { data: finalData } : {}),
       ...(constraints !== undefined ? { constraints } : {}),
       ...(stages !== undefined ? { stages } : {}),
-      ...(matchedGrantIds.length > 0
-        ? { matchedGrants: matchedGrantIds }
-        : {}),
+      ...(matchedGrantIds.length > 0 ? { matchedGrants: matchedGrantIds } : {}),
     };
   }
 }

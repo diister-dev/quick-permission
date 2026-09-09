@@ -9,13 +9,13 @@ import {
   EqualsOperation,
   NamedGroupOperation,
   numericalOperation,
-  Operation,
-  Options,
-  Query,
-  QueryOperation,
-  Tester,
+  type Operation,
+  type Options,
+  type Query,
+  type QueryOperation,
+  type Tester,
 } from "./core.ts";
-import { comparable, isArray, Key } from "./utils.ts";
+import { comparable, isArray, type Key } from "./utils.ts";
 
 class $Ne extends BaseOperation<unknown> {
   readonly propop = true;
@@ -114,7 +114,7 @@ class $Or extends BaseOperation<Query<unknown>[]> {
   override init(): void {
     assertGroupNotEmpty(this.params);
     this._ops = this.params.map((op) =>
-      createQueryOperation(op, null, this.options)
+      createQueryOperation(op, null, this.options),
     );
   }
   override reset(): void {
@@ -316,12 +316,7 @@ export const $elemMatch = (
   options: Options,
   name: string,
 ): $ElemMatch =>
-  new $ElemMatch(
-    params as Query<unknown>,
-    owneryQuery,
-    options,
-    name,
-  );
+  new $ElemMatch(params as Query<unknown>, owneryQuery, options, name);
 
 export const $nin = (
   params: unknown,
@@ -337,17 +332,19 @@ export const $in = (
   name: string,
 ): $In => new $In(params, owneryQuery, options, name);
 
-export const $lt = numericalOperation((params) => (b) =>
-  b != null && (b as number) < (params as number)
+export const $lt = numericalOperation(
+  (params) => (b) => b != null && (b as number) < (params as number),
 );
-export const $lte = numericalOperation((params) => (b) =>
-  b === params || (b != null && (b as number) <= (params as number))
+export const $lte = numericalOperation(
+  (params) => (b) =>
+    b === params || (b != null && (b as number) <= (params as number)),
 );
-export const $gt = numericalOperation((params) => (b) =>
-  b != null && (b as number) > (params as number)
+export const $gt = numericalOperation(
+  (params) => (b) => b != null && (b as number) > (params as number),
 );
-export const $gte = numericalOperation((params) => (b) =>
-  b === params || (b != null && (b as number) >= (params as number))
+export const $gte = numericalOperation(
+  (params) => (b) =>
+    b === params || (b != null && (b as number) >= (params as number)),
 );
 
 export const $mod = (
@@ -358,7 +355,8 @@ export const $mod = (
   const [mod, equalsValue] = modParams;
   return new EqualsOperation(
     // EqualsOperation accepts a Tester; cast retains that contract.
-    ((b: unknown) => (comparable(b) as number) % mod === equalsValue) as unknown,
+    ((b: unknown) =>
+      (comparable(b) as number) % mod === equalsValue) as unknown,
     owneryQuery,
     options,
   );
@@ -387,8 +385,7 @@ export const $not = (
   owneryQuery: Query<unknown>,
   options: Options,
   name: string,
-): $Not =>
-  new $Not(params as Query<unknown>, owneryQuery, options, name);
+): $Not => new $Not(params as Query<unknown>, owneryQuery, options, name);
 
 const typeAliases: Record<string, (v: unknown) => boolean> = {
   number: (v) => typeof v === "number",
@@ -417,7 +414,7 @@ export const $type = (
       }
       return b != null
         ? b instanceof (clazz as new (...args: unknown[]) => unknown) ||
-          (b as { constructor?: unknown }).constructor === clazz
+            (b as { constructor?: unknown }).constructor === clazz
         : false;
     }) as unknown,
     owneryQuery,

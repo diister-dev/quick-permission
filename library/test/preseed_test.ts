@@ -12,7 +12,8 @@
  *  - Indirect concrete-mode evaluation with fetcher
  */
 
-import { assertEquals } from "jsr:@std/assert";
+import { test } from "node:test";
+import { assertEquals } from "./+assert.ts";
 import {
   createSystem,
   indirectResource,
@@ -33,7 +34,7 @@ interface MembershipDoc {
   readonly status: string;
 }
 
-Deno.test("preseed: direct resource skips fetch when cache is hit", async () => {
+test("preseed: direct resource skips fetch when cache is hit", async () => {
   let fetchCount = 0;
   const userOf = resource({
     id: "user",
@@ -50,14 +51,16 @@ Deno.test("preseed: direct resource skips fetch when cache is hit", async () => 
         userOf.match(),
       ]),
     },
-    providers: [() => [
-      {
-        id: "g",
-        key: "users.read",
-        target: ["user:*"],
-        with: { user: { role: "admin" } },
-      },
-    ]],
+    providers: [
+      () => [
+        {
+          id: "g",
+          key: "users.read",
+          target: ["user:*"],
+          with: { user: { role: "admin" } },
+        },
+      ],
+    ],
   });
 
   const ctx = sys.context({ subject: { id: "user:s" } });
@@ -76,7 +79,7 @@ Deno.test("preseed: direct resource skips fetch when cache is hit", async () => 
   assertEquals(fetchCount, 0, "no DB fetch should happen when preseeded");
 });
 
-Deno.test("preseed: cache miss when dedupKey doesn't match runtime shape", async () => {
+test("preseed: cache miss when dedupKey doesn't match runtime shape", async () => {
   let fetchCount = 0;
   const userOf = resource({
     id: "user",
@@ -93,14 +96,16 @@ Deno.test("preseed: cache miss when dedupKey doesn't match runtime shape", async
         userOf.match(),
       ]),
     },
-    providers: [() => [
-      {
-        id: "g",
-        key: "users.read",
-        target: ["user:*"],
-        with: { user: { role: "admin" } },
-      },
-    ]],
+    providers: [
+      () => [
+        {
+          id: "g",
+          key: "users.read",
+          target: ["user:*"],
+          with: { user: { role: "admin" } },
+        },
+      ],
+    ],
   });
 
   const ctx = sys.context({ subject: { id: "user:s" } });
@@ -114,7 +119,7 @@ Deno.test("preseed: cache miss when dedupKey doesn't match runtime shape", async
   assertEquals(fetchCount, 1, "preseed missed, fetch happened");
 });
 
-Deno.test("preseed: indirect resource with `value` extractor stores joined docs", async () => {
+test("preseed: indirect resource with `value` extractor stores joined docs", async () => {
   let indirectFetchCount = 0;
   const participantOf = resource({
     id: "participant",
@@ -126,14 +131,16 @@ Deno.test("preseed: indirect resource with `value` extractor stores joined docs"
     from: participantOf,
     on: { localField: "_id", foreignField: "participantId" },
     cardinality: "many",
-    fetch: (sourceDoc) => {
+    fetch: (): MembershipDoc[] => {
       indirectFetchCount += 1;
-      return [{
-        _id: "om:1",
-        userId: "user:1",
-        orgId: "org:beta",
-        status: "active",
-      }];
+      return [
+        {
+          _id: "om:1",
+          userId: "user:1",
+          orgId: "org:beta",
+          status: "active",
+        },
+      ];
     },
   });
 
@@ -143,16 +150,18 @@ Deno.test("preseed: indirect resource with `value` extractor stores joined docs"
         target: target.required("participant"),
       }).rules([participantOf.match(), membershipsOf.match()]),
     },
-    providers: [() => [
-      {
-        id: "g",
-        key: "participants.read",
-        target: ["participant:*"],
-        with: {
-          memberships_of_participant: { orgId: "org:beta", status: "active" },
+    providers: [
+      () => [
+        {
+          id: "g",
+          key: "participants.read",
+          target: ["participant:*"],
+          with: {
+            memberships_of_participant: { orgId: "org:beta", status: "active" },
+          },
         },
-      },
-    ]],
+      ],
+    ],
   });
 
   const ctx = sys.context({ subject: { id: "user:s" } });
@@ -172,16 +181,20 @@ Deno.test("preseed: indirect resource with `value` extractor stores joined docs"
   });
   // Also preseed the direct participant resource (otherwise it would be
   // fetched in concrete mode).
-  ctx.preseed(participantOf, docs.map((d) => ({ _id: d._id })), {
-    dedupKey: (d) => [d._id],
-  });
+  ctx.preseed(
+    participantOf,
+    docs.map((d) => ({ _id: d._id })),
+    {
+      dedupKey: (d) => [d._id],
+    },
+  );
 
   const r = await ctx.can("participants.read", ["participant:p1"]);
   assertEquals(r.ok, true);
   assertEquals(indirectFetchCount, 0, "indirect fetch skipped via preseed");
 });
 
-Deno.test("preseed: indirect concrete-mode deny when no joined doc matches spec", async () => {
+test("preseed: indirect concrete-mode deny when no joined doc matches spec", async () => {
   // Symmetric to cap-mode pipeline `$elemMatch` : the rule must reject
   // the grant when none of the joined docs satisfies the spec — so a
   // by-id `read` is consistent with the listing's scope.
@@ -206,27 +219,27 @@ Deno.test("preseed: indirect concrete-mode deny when no joined doc matches spec"
         target: target.required("participant"),
       }).rules([participantOf.match(), membershipsOf.match()]),
     },
-    providers: [() => [
-      {
-        id: "g",
-        key: "participants.read",
-        target: ["participant:*"],
-        with: {
-          memberships_of_participant: { orgId: "org:beta", status: "active" },
+    providers: [
+      () => [
+        {
+          id: "g",
+          key: "participants.read",
+          target: ["participant:*"],
+          with: {
+            memberships_of_participant: { orgId: "org:beta", status: "active" },
+          },
         },
-      },
-    ]],
+      ],
+    ],
   });
 
-  const r = await sys.context({ subject: { id: "user:s" } }).can(
-    "participants.read",
-    ["participant:p1"],
-  );
+  const r = await sys
+    .context({ subject: { id: "user:s" } })
+    .can("participants.read", ["participant:p1"]);
   assertEquals(r.ok, false, "grant denied — no membership matches Beta");
 });
 
-
-Deno.test("preseed: indirect WITHOUT fetcher stays sentinel in concrete mode (legacy)", async () => {
+test("preseed: indirect WITHOUT fetcher stays sentinel in concrete mode (legacy)", async () => {
   // Backward-compat : an indirect without a `fetch` keeps its sentinel
   // behaviour even in concrete mode. The rule passes silently — useful
   // for indirects that exist only for the cap-mode pipeline.
@@ -249,22 +262,23 @@ Deno.test("preseed: indirect WITHOUT fetcher stays sentinel in concrete mode (le
         target: target.required("participant"),
       }).rules([participantOf.match(), membershipsOf.match()]),
     },
-    providers: [() => [
-      {
-        id: "g",
-        key: "participants.read",
-        target: ["participant:*"],
-        with: {
-          memberships_of_participant: { orgId: "org:beta" }, // ignored without fetcher
+    providers: [
+      () => [
+        {
+          id: "g",
+          key: "participants.read",
+          target: ["participant:*"],
+          with: {
+            memberships_of_participant: { orgId: "org:beta" }, // ignored without fetcher
+          },
         },
-      },
-    ]],
+      ],
+    ],
   });
 
-  const r = await sys.context({ subject: { id: "user:s" } }).can(
-    "participants.read",
-    ["participant:p1"],
-  );
+  const r = await sys
+    .context({ subject: { id: "user:s" } })
+    .can("participants.read", ["participant:p1"]);
   // Sentinel → ok regardless of with content (legacy / opt-in concrete mode).
   assertEquals(r.ok, true);
 });

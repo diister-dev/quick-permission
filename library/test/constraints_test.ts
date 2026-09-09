@@ -1,4 +1,5 @@
-import { assertEquals } from "jsr:@std/assert";
+import { test } from "node:test";
+import { assertEquals } from "./+assert.ts";
 import {
   createSystem,
   matchPath,
@@ -17,41 +18,58 @@ const userOf = resource({
   dedupKey: ({ target }) => target[0] as string,
 });
 
-Deno.test("constraints: single matched grant → constraint exposed as-is", async () => {
+test("constraints: single matched grant → constraint exposed as-is", async () => {
   const sys = createSystem({
     schema: {
       "users.read": permission({ target: target.required("user") }).rules([
         userOf.match(),
       ]),
     },
-    providers: [() => [
-      { id: "g", key: "users.read", target: ["user:*"], with: { user: { role: "editor" } } },
-    ]],
+    providers: [
+      () => [
+        {
+          id: "g",
+          key: "users.read",
+          target: ["user:*"],
+          with: { user: { role: "editor" } },
+        },
+      ],
+    ],
   });
-  const r = await sys.context({ subject: { id: "s" } }).can(
-    "users.read",
-    ["user:lucas"],
-  );
+  const r = await sys
+    .context({ subject: { id: "s" } })
+    .can("users.read", ["user:lucas"]);
   assertEquals(r.ok, true);
   if (r.ok) assertEquals(r.constraints, { role: "editor" });
 });
 
-Deno.test("constraints: multiple matched grants → $or", async () => {
+test("constraints: multiple matched grants → $or", async () => {
   const sys = createSystem({
     schema: {
       "users.read": permission({ target: target.required("user") }).rules([
         userOf.match(),
       ]),
     },
-    providers: [() => [
-      { id: "g1", key: "users.read", target: ["user:*"], with: { user: { role: "editor" } } },
-      { id: "g2", key: "users.read", target: ["user:*"], with: { user: { orgId: "org:b" } } },
-    ]],
+    providers: [
+      () => [
+        {
+          id: "g1",
+          key: "users.read",
+          target: ["user:*"],
+          with: { user: { role: "editor" } },
+        },
+        {
+          id: "g2",
+          key: "users.read",
+          target: ["user:*"],
+          with: { user: { orgId: "org:b" } },
+        },
+      ],
+    ],
   });
-  const r = await sys.context({ subject: { id: "s" } }).can(
-    "users.read",
-    ["user:lucas"],
-  );
+  const r = await sys
+    .context({ subject: { id: "s" } })
+    .can("users.read", ["user:lucas"]);
   assertEquals(r.ok, true);
   if (r.ok) {
     assertEquals(r.constraints, {
@@ -60,27 +78,33 @@ Deno.test("constraints: multiple matched grants → $or", async () => {
   }
 });
 
-Deno.test("constraints: grant without spec collapses union to {} (any)", async () => {
+test("constraints: grant without spec collapses union to {} (any)", async () => {
   const sys = createSystem({
     schema: {
       "users.read": permission({ target: target.required("user") }).rules([
         userOf.match(),
       ]),
     },
-    providers: [() => [
-      { id: "scoped", key: "users.read", target: ["user:*"], with: { user: { role: "editor" } } },
-      { id: "open", key: "users.read", target: ["user:*"] },
-    ]],
+    providers: [
+      () => [
+        {
+          id: "scoped",
+          key: "users.read",
+          target: ["user:*"],
+          with: { user: { role: "editor" } },
+        },
+        { id: "open", key: "users.read", target: ["user:*"] },
+      ],
+    ],
   });
-  const r = await sys.context({ subject: { id: "s" } }).can(
-    "users.read",
-    ["user:lucas"],
-  );
+  const r = await sys
+    .context({ subject: { id: "s" } })
+    .can("users.read", ["user:lucas"]);
   assertEquals(r.ok, true);
   if (r.ok) assertEquals(r.constraints, {});
 });
 
-Deno.test("constraints: capability mode returns union without fetching", async () => {
+test("constraints: capability mode returns union without fetching", async () => {
   let fetches = 0;
   const u = resource({
     id: "user",
@@ -96,15 +120,26 @@ Deno.test("constraints: capability mode returns union without fetching", async (
         u.match(),
       ]),
     },
-    providers: [() => [
-      { id: "g1", key: "users.read", target: ["user:*"], with: { user: { _id: "user:lucas" } } },
-      { id: "g2", key: "users.read", target: ["user:*"], with: { user: { orgId: "org:b" } } },
-    ]],
+    providers: [
+      () => [
+        {
+          id: "g1",
+          key: "users.read",
+          target: ["user:*"],
+          with: { user: { _id: "user:lucas" } },
+        },
+        {
+          id: "g2",
+          key: "users.read",
+          target: ["user:*"],
+          with: { user: { orgId: "org:b" } },
+        },
+      ],
+    ],
   });
-  const r = await sys.context({ subject: { id: "s" } }).can(
-    "users.read",
-    ["user:*"],
-  );
+  const r = await sys
+    .context({ subject: { id: "s" } })
+    .can("users.read", ["user:*"]);
   assertEquals(r.ok, true);
   assertEquals(fetches, 0);
   if (r.ok) {
@@ -114,7 +149,7 @@ Deno.test("constraints: capability mode returns union without fetching", async (
   }
 });
 
-Deno.test("constraints: $ne / $in operators carried through", async () => {
+test("constraints: $ne / $in operators carried through", async () => {
   const u = resource({
     id: "user",
     fetch: ({ target }) => ({
@@ -130,25 +165,26 @@ Deno.test("constraints: $ne / $in operators carried through", async () => {
         u.match(),
       ]),
     },
-    providers: [() => [
-      {
-        id: "g",
-        key: "users.read",
-        target: ["user:*"],
-        with: {
-          user: {
-            status: { $ne: "external" },
-            role: { $in: ["editor", "admin"] },
+    providers: [
+      () => [
+        {
+          id: "g",
+          key: "users.read",
+          target: ["user:*"],
+          with: {
+            user: {
+              status: { $ne: "external" },
+              role: { $in: ["editor", "admin"] },
+            },
           },
         },
-      },
-    ]],
+      ],
+    ],
   });
   // Lucas: passes both ($ne external + role in editor/admin)
-  const ok = await sys.context({ subject: { id: "s" } }).can(
-    "users.read",
-    ["user:lucas"],
-  );
+  const ok = await sys
+    .context({ subject: { id: "s" } })
+    .can("users.read", ["user:lucas"]);
   assertEquals(ok.ok, true);
   if (ok.ok) {
     assertEquals(ok.constraints, {
@@ -158,14 +194,13 @@ Deno.test("constraints: $ne / $in operators carried through", async () => {
   }
 
   // Other user: fails
-  const ko = await sys.context({ subject: { id: "s" } }).can(
-    "users.read",
-    ["user:other"],
-  );
+  const ko = await sys
+    .context({ subject: { id: "s" } })
+    .can("users.read", ["user:other"]);
   assertEquals(ko.ok, false);
 });
 
-Deno.test("matchPath: translates target-only grant to {_id: target[0]}", async () => {
+test("matchPath: translates target-only grant to {_id: target[0]}", async () => {
   const u = resource({
     id: "user",
     fetch: ({ target }) => ({ _id: target[0] as string }),
@@ -178,19 +213,16 @@ Deno.test("matchPath: translates target-only grant to {_id: target[0]}", async (
         matchPath(),
       ]),
     },
-    providers: [() => [
-      { id: "g", key: "users.read", target: ["user:lucas"] },
-    ]],
+    providers: [() => [{ id: "g", key: "users.read", target: ["user:lucas"] }]],
   });
-  const r = await sys.context({ subject: { id: "s" } }).can(
-    "users.read",
-    ["user:*"],
-  );
+  const r = await sys
+    .context({ subject: { id: "s" } })
+    .can("users.read", ["user:*"]);
   assertEquals(r.ok, true);
   if (r.ok) assertEquals(r.constraints, { _id: "user:lucas" });
 });
 
-Deno.test("matchPath: combines with grant.with via AND inside the same grant", async () => {
+test("matchPath: combines with grant.with via AND inside the same grant", async () => {
   const u = resource({
     id: "user",
     fetch: ({ target }) => ({
@@ -206,19 +238,20 @@ Deno.test("matchPath: combines with grant.with via AND inside the same grant", a
         matchPath(),
       ]),
     },
-    providers: [() => [
-      {
-        id: "g",
-        key: "users.read",
-        target: ["user:lucas"],
-        with: { user: { status: "active" } },
-      },
-    ]],
+    providers: [
+      () => [
+        {
+          id: "g",
+          key: "users.read",
+          target: ["user:lucas"],
+          with: { user: { status: "active" } },
+        },
+      ],
+    ],
   });
-  const r = await sys.context({ subject: { id: "s" } }).can(
-    "users.read",
-    ["user:*"],
-  );
+  const r = await sys
+    .context({ subject: { id: "s" } })
+    .can("users.read", ["user:*"]);
   assertEquals(r.ok, true);
   if (r.ok) {
     assertEquals(r.constraints, {
@@ -227,7 +260,7 @@ Deno.test("matchPath: combines with grant.with via AND inside the same grant", a
   }
 });
 
-Deno.test("matchPath: wildcard target emits no constraint", async () => {
+test("matchPath: wildcard target emits no constraint", async () => {
   const u = resource({
     id: "user",
     fetch: ({ target }) => ({ _id: target[0] as string }),
@@ -240,19 +273,16 @@ Deno.test("matchPath: wildcard target emits no constraint", async () => {
         matchPath(),
       ]),
     },
-    providers: [() => [
-      { id: "admin", key: "users.read", target: ["user:*"] },
-    ]],
+    providers: [() => [{ id: "admin", key: "users.read", target: ["user:*"] }]],
   });
-  const r = await sys.context({ subject: { id: "s" } }).can(
-    "users.read",
-    ["user:*"],
-  );
+  const r = await sys
+    .context({ subject: { id: "s" } })
+    .can("users.read", ["user:*"]);
   assertEquals(r.ok, true);
   if (r.ok) assertEquals(r.constraints, {});
 });
 
-Deno.test("matchPath: custom field + segment for path resources", async () => {
+test("matchPath: custom field + segment for path resources", async () => {
   const sys = createSystem({
     schema: {
       "expo.badges.read": permission({
@@ -262,19 +292,20 @@ Deno.test("matchPath: custom field + segment for path resources", async () => {
         matchPath({ segment: 1 }),
       ]),
     },
-    providers: [() => [
-      { id: "g", key: "expo.badges.read", target: ["expo:e1", "badge:b42"] },
-    ]],
+    providers: [
+      () => [
+        { id: "g", key: "expo.badges.read", target: ["expo:e1", "badge:b42"] },
+      ],
+    ],
   });
-  const r = await sys.context({ subject: { id: "s" } }).can(
-    "expo.badges.read",
-    ["expo:e1", "badge:*"],
-  );
+  const r = await sys
+    .context({ subject: { id: "s" } })
+    .can("expo.badges.read", ["expo:e1", "badge:*"]);
   assertEquals(r.ok, true);
   if (r.ok) assertEquals(r.constraints, { _id: "badge:b42" });
 });
 
-Deno.test("constraints: multiple match rules AND-merged within a grant", async () => {
+test("constraints: multiple match rules AND-merged within a grant", async () => {
   const expoOf = resource({
     id: "exposition",
     fetch: ({ target }) => ({ _id: target[0] as string, status: "active" }),
@@ -289,27 +320,25 @@ Deno.test("constraints: multiple match rules AND-merged within a grant", async (
     schema: {
       "expositions.badges.read": permission({
         target: target.path("exposition", "badge"),
-      }).rules([
-        expoOf.match(),
-        badgeOf.match(),
-      ]),
+      }).rules([expoOf.match(), badgeOf.match()]),
     },
-    providers: [() => [
-      {
-        id: "g",
-        key: "expositions.badges.read",
-        target: ["exposition:e1", "badge:*"],
-        with: {
-          exposition: { _id: "exposition:e1" },
-          badge: { status: "active" },
+    providers: [
+      () => [
+        {
+          id: "g",
+          key: "expositions.badges.read",
+          target: ["exposition:e1", "badge:*"],
+          with: {
+            exposition: { _id: "exposition:e1" },
+            badge: { status: "active" },
+          },
         },
-      },
-    ]],
+      ],
+    ],
   });
-  const r = await sys.context({ subject: { id: "s" } }).can(
-    "expositions.badges.read",
-    ["exposition:e1", "badge:*"],
-  );
+  const r = await sys
+    .context({ subject: { id: "s" } })
+    .can("expositions.badges.read", ["exposition:e1", "badge:*"]);
   assertEquals(r.ok, true);
   if (r.ok) {
     // `expoOf` is auto-bound to segment 0 (id === "exposition" matches
@@ -324,7 +353,7 @@ Deno.test("constraints: multiple match rules AND-merged within a grant", async (
   }
 });
 
-Deno.test("constraints: $where operator rejected by whitelist", async () => {
+test("constraints: $where operator rejected by whitelist", async () => {
   const u = resource({
     id: "user",
     fetch: () => ({ _id: "u" }),
@@ -336,15 +365,17 @@ Deno.test("constraints: $where operator rejected by whitelist", async () => {
         u.match(),
       ]),
     },
-    providers: [() => [
-      {
-        id: "g",
-        key: "users.read",
-        target: ["user:*"],
-        // deno-lint-ignore no-explicit-any
-        with: { user: { $where: "function() { return true }" } as any },
-      },
-    ]],
+    providers: [
+      () => [
+        {
+          id: "g",
+          key: "users.read",
+          target: ["user:*"],
+          // deno-lint-ignore no-explicit-any
+          with: { user: { $where: "function() { return true }" } as any },
+        },
+      ],
+    ],
   });
   let threw = false;
   try {

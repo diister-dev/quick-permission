@@ -28,7 +28,11 @@ function matchSegment(requested: unknown, pattern: unknown): boolean {
   if (pattern === "*") return true;
 
   // Prefix wildcard on string segments: "article:*"
-  if (typeof pattern === "string" && typeof requested === "string" && pattern.endsWith("*")) {
+  if (
+    typeof pattern === "string" &&
+    typeof requested === "string" &&
+    pattern.endsWith("*")
+  ) {
     return requested.startsWith(pattern.slice(0, -1));
   }
 

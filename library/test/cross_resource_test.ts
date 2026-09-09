@@ -1,4 +1,5 @@
-import { assertEquals } from "jsr:@std/assert";
+import { test } from "node:test";
+import { assertEquals } from "./+assert.ts";
 import {
   createSystem,
   defineRule,
@@ -16,9 +17,7 @@ import {
 const teamMembersOf = resource({
   id: "team-members",
   fetch: ({ subject }) =>
-    subject.id === "user:manager"
-      ? ["user:teammate1", "user:teammate2"]
-      : [],
+    subject.id === "user:manager" ? ["user:teammate1", "user:teammate2"] : [],
   dedupKey: ({ subject }) => subject.id,
 });
 
@@ -31,7 +30,7 @@ const userOf = resource({
   dedupKey: ({ target }) => target[0] as string,
 });
 
-Deno.test("cross-resource : multi-needs reçoit un tuple aligné de données", async () => {
+test("cross-resource : multi-needs reçoit un tuple aligné de données", async () => {
   const requireTeammate = defineRule({
     kind: "require-teammate",
     needs: [userOf, teamMembersOf] as const,
@@ -50,36 +49,37 @@ Deno.test("cross-resource : multi-needs reçoit un tuple aligné de données", a
         requireTeammate,
       ]),
     },
-    providers: [() => [{
-      key: "users.read",
-      target: ["user:*"],
-      flags: { teamScope: true },
-    }]],
+    providers: [
+      () => [
+        {
+          key: "users.read",
+          target: ["user:*"],
+          flags: { teamScope: true },
+        },
+      ],
+    ],
   });
 
   // Manager voit teammate
-  const ok = await sys.context({ subject: { id: "user:manager" } }).can(
-    "users.read",
-    ["user:teammate1"],
-  );
+  const ok = await sys
+    .context({ subject: { id: "user:manager" } })
+    .can("users.read", ["user:teammate1"]);
   assertEquals(ok.ok, true);
 
   // Manager ne se voit pas
-  const self = await sys.context({ subject: { id: "user:manager" } }).can(
-    "users.read",
-    ["user:manager"],
-  );
+  const self = await sys
+    .context({ subject: { id: "user:manager" } })
+    .can("users.read", ["user:manager"]);
   assertEquals(self.ok, false);
 
   // Manager ne voit pas les non-teammates
-  const stranger = await sys.context({ subject: { id: "user:manager" } }).can(
-    "users.read",
-    ["user:stranger"],
-  );
+  const stranger = await sys
+    .context({ subject: { id: "user:manager" } })
+    .can("users.read", ["user:stranger"]);
   assertEquals(stranger.ok, false);
 });
 
-Deno.test("cross-resource : 2 needs fetched en parallèle, dédupliqués indépendamment", async () => {
+test("cross-resource : 2 needs fetched en parallèle, dédupliqués indépendamment", async () => {
   let userFetches = 0;
   let teamFetches = 0;
 
@@ -114,11 +114,15 @@ Deno.test("cross-resource : 2 needs fetched en parallèle, dédupliqués indépe
         cross,
       ]),
     },
-    providers: [() => [{
-      key: "test.action",
-      target: ["user:*"],
-      flags: { checkCross: true },
-    }]],
+    providers: [
+      () => [
+        {
+          key: "test.action",
+          target: ["user:*"],
+          flags: { checkCross: true },
+        },
+      ],
+    ],
   });
 
   const ctx = sys.context({ subject: { id: "user:1" } });
@@ -130,7 +134,7 @@ Deno.test("cross-resource : 2 needs fetched en parallèle, dédupliqués indépe
   assertEquals(teamFetches, 1);
 });
 
-Deno.test("defineRule : descriptor expose `sources` quand needs.length > 1", () => {
+test("defineRule : descriptor expose `sources` quand needs.length > 1", () => {
   const r = defineRule({
     kind: "cross-test",
     needs: [userOf, teamMembersOf] as const,
@@ -141,7 +145,7 @@ Deno.test("defineRule : descriptor expose `sources` quand needs.length > 1", () 
   assertEquals(r.descriptor.source, undefined);
 });
 
-Deno.test("defineRule : descriptor expose `source` quand needs.length === 1", () => {
+test("defineRule : descriptor expose `source` quand needs.length === 1", () => {
   const r = defineRule({
     kind: "single-test",
     needs: [userOf] as const,
@@ -151,7 +155,7 @@ Deno.test("defineRule : descriptor expose `source` quand needs.length === 1", ()
   assertEquals(r.descriptor.sources, undefined);
 });
 
-Deno.test("defineRule : descriptor expose `flag` si défini", () => {
+test("defineRule : descriptor expose `flag` si défini", () => {
   const r = defineRule({
     kind: "flagged-test",
     needs: [] as const,
@@ -161,7 +165,7 @@ Deno.test("defineRule : descriptor expose `flag` si défini", () => {
   assertEquals(r.descriptor.flag, "myFlag");
 });
 
-Deno.test("defineRule : describe() merge dans le descriptor sans écraser les champs auto", () => {
+test("defineRule : describe() merge dans le descriptor sans écraser les champs auto", () => {
   const r = defineRule({
     kind: "described-test",
     needs: [userOf] as const,
@@ -180,7 +184,7 @@ Deno.test("defineRule : describe() merge dans le descriptor sans écraser les ch
   assertEquals(r.descriptor.myMeta, "preserved");
 });
 
-Deno.test("defineRule : flag + activeWhen mutuellement exclusifs", () => {
+test("defineRule : flag + activeWhen mutuellement exclusifs", () => {
   let threw = false;
   try {
     defineRule({

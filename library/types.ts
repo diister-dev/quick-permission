@@ -17,9 +17,11 @@ export type SegmentSpec<N extends string = string, T = unknown> = {
 
 export type AnySegment = SegmentSpec<string, unknown>;
 
-export type SpecToSegment<S> = S extends string ? SegmentSpec<S, S>
-  : S extends AnySegment ? S
-  : never;
+export type SpecToSegment<S> = S extends string
+  ? SegmentSpec<S, S>
+  : S extends AnySegment
+    ? S
+    : never;
 
 export type TargetNone = {
   readonly kind: "none";
@@ -47,21 +49,29 @@ export type AnyTarget =
   | TargetRequired<AnySegment>
   | TargetPath<readonly AnySegment[]>;
 
-export type SegmentNames<T extends AnyTarget> = T extends TargetNone ? never
-  : T extends TargetOptional<infer S> ? S["name"]
-  : T extends TargetRequired<infer S> ? S["name"]
-  : T extends TargetPath<infer Ss>
-    ? Ss extends readonly AnySegment[] ? Ss[number]["name"] : never
-  : never;
+export type SegmentNames<T extends AnyTarget> = T extends TargetNone
+  ? never
+  : T extends TargetOptional<infer S>
+    ? S["name"]
+    : T extends TargetRequired<infer S>
+      ? S["name"]
+      : T extends TargetPath<infer Ss>
+        ? Ss extends readonly AnySegment[]
+          ? Ss[number]["name"]
+          : never
+        : never;
 
 export type TargetArgs<T extends AnyTarget> = T extends TargetNone
   ? readonly []
-  : T extends TargetOptional<AnySegment> ? readonly [string?]
-  : T extends TargetRequired<AnySegment> ? readonly [string]
-  : T extends TargetPath<infer Ss>
-    ? Ss extends readonly AnySegment[] ? { -readonly [K in keyof Ss]: string }
-    : never
-  : never;
+  : T extends TargetOptional<AnySegment>
+    ? readonly [string?]
+    : T extends TargetRequired<AnySegment>
+      ? readonly [string]
+      : T extends TargetPath<infer Ss>
+        ? Ss extends readonly AnySegment[]
+          ? { -readonly [K in keyof Ss]: string }
+          : never
+        : never;
 
 export type Subject = {
   readonly id: string;
@@ -139,11 +149,11 @@ export type FilterContribution = {
  */
 export type RuleResult =
   | {
-    readonly ok: true;
-    readonly data?: unknown;
-    readonly constraint?: Record<string, unknown>;
-    readonly filter?: FilterContribution;
-  }
+      readonly ok: true;
+      readonly data?: unknown;
+      readonly constraint?: Record<string, unknown>;
+      readonly filter?: FilterContribution;
+    }
   | { readonly ok: false; readonly reason: string };
 
 /**
@@ -188,10 +198,7 @@ export interface Rule {
    * Logique d'évaluation. `data` est un tuple aligné sur `needs` (1 entrée
    * par need, dans l'ordre).
    */
-  readonly check: (
-    data: readonly unknown[],
-    ctx: FetchCtx,
-  ) => RuleResult;
+  readonly check: (data: readonly unknown[], ctx: FetchCtx) => RuleResult;
 }
 
 /**
@@ -325,18 +332,18 @@ export type ListEntry<TMeta = unknown> = {
  */
 export type TreeNode<TMeta = unknown> =
   | {
-    readonly kind: "permission" | "intermediate";
-    readonly key: string;
-    readonly metadata: TMeta | undefined;
-    readonly target: SerializableTarget;
-    readonly rules: readonly RuleDescriptor[];
-    readonly expandsTo?: readonly string[];
-  }
+      readonly kind: "permission" | "intermediate";
+      readonly key: string;
+      readonly metadata: TMeta | undefined;
+      readonly target: SerializableTarget;
+      readonly rules: readonly RuleDescriptor[];
+      readonly expandsTo?: readonly string[];
+    }
   | {
-    readonly kind: "group";
-    readonly metadata: undefined;
-    readonly children: Readonly<Record<string, TreeNode<TMeta>>>;
-  };
+      readonly kind: "group";
+      readonly metadata: undefined;
+      readonly children: Readonly<Record<string, TreeNode<TMeta>>>;
+    };
 
 export type SerializableSegment = {
   readonly name: string;
@@ -368,9 +375,9 @@ export type SerializableTarget =
   | { readonly kind: "optional"; readonly segment: SerializableSegment }
   | { readonly kind: "required"; readonly segment: SerializableSegment }
   | {
-    readonly kind: "path";
-    readonly segments: readonly SerializableSegment[];
-  };
+      readonly kind: "path";
+      readonly segments: readonly SerializableSegment[];
+    };
 
 /**
  * Résultat d'un `can()` call.
@@ -385,17 +392,17 @@ export type SerializableTarget =
  */
 export type CanResult =
   | {
-    readonly ok: true;
-    readonly data?: unknown;
-    readonly constraints?: Record<string, unknown>;
-    /**
-     * Pipeline d'aggregation MongoDB produit quand au moins une
-     * `IndirectResource` est référencée dans les rules de la permission.
-     * Le consommateur (adapter mongodbee côté appli) choisit entre
-     * `find(constraints)` et `aggregate(stages)` selon la présence de
-     * `stages`. Cf. `indirect-aggregation.ts`.
-     */
-    readonly stages?: readonly Record<string, unknown>[];
-    readonly matchedGrants?: readonly string[];
-  }
+      readonly ok: true;
+      readonly data?: unknown;
+      readonly constraints?: Record<string, unknown>;
+      /**
+       * Pipeline d'aggregation MongoDB produit quand au moins une
+       * `IndirectResource` est référencée dans les rules de la permission.
+       * Le consommateur (adapter mongodbee côté appli) choisit entre
+       * `find(constraints)` et `aggregate(stages)` selon la présence de
+       * `stages`. Cf. `indirect-aggregation.ts`.
+       */
+      readonly stages?: readonly Record<string, unknown>[];
+      readonly matchedGrants?: readonly string[];
+    }
   | { readonly ok: false; readonly reasons: readonly string[] };

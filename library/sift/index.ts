@@ -8,7 +8,7 @@ import {
   createQueryOperation,
   createQueryTester,
   EqualsOperation,
-  Options,
+  type Options,
 } from "./core.ts";
 import type {
   ArrayValueQuery,
@@ -35,7 +35,7 @@ const createDefaultQueryOperation = <TItem, TSchema extends TItem = TItem>(
 const createDefaultQueryTester = <TItem, TSchema extends TItem = TItem>(
   query: Query<TSchema>,
   options: Partial<Options> = {},
-): (item: TItem, key?: Key, owner?: unknown) => boolean => {
+): ((item: TItem, key?: Key, owner?: unknown) => boolean) => {
   const op = createDefaultQueryOperation<TItem, TSchema>(query, null, options);
   return createOperationTester(op);
 };

@@ -11,12 +11,13 @@
  *  - deduplication : same leaf via two paths appears once
  */
 
-import { assertEquals } from "jsr:@std/assert";
+import { test } from "node:test";
+import { assertEquals } from "./+assert.ts";
 import { createSystem } from "../system.ts";
 import { intermediate, permission } from "../permission.ts";
 import { target } from "../target.ts";
 
-Deno.test("list().expandsTo : flattens sub-intermediates to leaves only", () => {
+test("list().expandsTo : flattens sub-intermediates to leaves only", () => {
   const sys = createSystem({
     schema: {
       "users.read": permission({ target: target.required("user") }).rules([]),
@@ -29,7 +30,7 @@ Deno.test("list().expandsTo : flattens sub-intermediates to leaves only", () => 
       "users.manage": intermediate({
         target: target.required("user"),
         expandsTo: (g) => [
-          { ...g, key: "users.list" },     // → users.read via expansion
+          { ...g, key: "users.list" }, // → users.read via expansion
           { ...g, key: "users.update" },
           { ...g, key: "users.delete" },
         ],
@@ -45,27 +46,28 @@ Deno.test("list().expandsTo : flattens sub-intermediates to leaves only", () => 
   assertEquals(byKey.get("users.update")!.expandsTo, undefined);
 
   // users.list : 1-hop, just users.read
-  assertEquals(
-    [...(byKey.get("users.list")!.expandsTo ?? [])].sort(),
-    ["users.read"],
-  );
+  assertEquals([...(byKey.get("users.list")!.expandsTo ?? [])].sort(), [
+    "users.read",
+  ]);
 
   // users.manage : 2-hop transitive — users.list flattens to users.read,
   // and intermediates themselves are NOT in the descendants list (leaves only).
-  assertEquals(
-    [...(byKey.get("users.manage")!.expandsTo ?? [])].sort(),
-    ["users.delete", "users.read", "users.update"],
-  );
+  assertEquals([...(byKey.get("users.manage")!.expandsTo ?? [])].sort(), [
+    "users.delete",
+    "users.read",
+    "users.update",
+  ]);
 });
 
-Deno.test("list().expandsTo : cycle detection", () => {
+test("list().expandsTo : cycle detection", () => {
   // Pathological loop: A.bundle expandsTo B.bundle which expandsTo A.bundle.
   // The `visited` set must break the cycle. Both should resolve their
   // leaf `endpoint.read`.
   const sys = createSystem({
     schema: {
-      "endpoint.read": permission({ target: target.required("endpoint") })
-        .rules([]),
+      "endpoint.read": permission({
+        target: target.required("endpoint"),
+      }).rules([]),
       "a.bundle": intermediate({
         target: target.required("endpoint"),
         expandsTo: (g) => [
@@ -93,7 +95,7 @@ Deno.test("list().expandsTo : cycle detection", () => {
   ]);
 });
 
-Deno.test("list().expandsTo : deduplicates leaves reached via multiple paths", () => {
+test("list().expandsTo : deduplicates leaves reached via multiple paths", () => {
   const sys = createSystem({
     schema: {
       "leaf.x": permission({ target: target.required("x") }).rules([]),
@@ -105,7 +107,7 @@ Deno.test("list().expandsTo : deduplicates leaves reached via multiple paths", (
         target: target.required("x"),
         expandsTo: (g) => [{ ...g, key: "leaf.x" }],
       }).rules([]),
-      "root": intermediate({
+      root: intermediate({
         target: target.required("x"),
         expandsTo: (g) => [
           { ...g, key: "mid.a" },
@@ -121,7 +123,7 @@ Deno.test("list().expandsTo : deduplicates leaves reached via multiple paths", (
   assertEquals([...(root.expandsTo ?? [])], ["leaf.x"]);
 });
 
-Deno.test("list().expandsTo : path-targets get arity-matched wildcard stub", () => {
+test("list().expandsTo : path-targets get arity-matched wildcard stub", () => {
   // Without arity-matched stubs, an `expandsTo` that synthesizes a child
   // target via `grant.target![0]` would crash. The lib's `stubTargetFor`
   // emits ["*", "*"] for a 2-segment path so callbacks work as-is.
@@ -147,7 +149,7 @@ Deno.test("list().expandsTo : path-targets get arity-matched wildcard stub", () 
   assertEquals([...(root.expandsTo ?? [])], ["expo.entity.read"]);
 });
 
-Deno.test("tree() : intermediate leaves carry expandsTo, groups do not", () => {
+test("tree() : intermediate leaves carry expandsTo, groups do not", () => {
   const sys = createSystem({
     schema: {
       "users.read": permission({ target: target.required("user") }).rules([]),

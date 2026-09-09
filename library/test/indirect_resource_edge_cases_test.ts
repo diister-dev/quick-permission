@@ -17,7 +17,8 @@
  *    when a sibling grant is rejected.
  */
 
-import { assertEquals } from "jsr:@std/assert";
+import { test } from "node:test";
+import { assertEquals } from "./+assert.ts";
 import {
   createSystem,
   indirectResource,
@@ -32,8 +33,14 @@ interface ExpoDoc {
 }
 
 const EXPOS: Record<string, ExpoDoc> = {
-  "exposition:beta-owned": { _id: "exposition:beta-owned", entreprise: "entreprise:beta" },
-  "exposition:globex-owned": { _id: "exposition:globex-owned", entreprise: "entreprise:globex" },
+  "exposition:beta-owned": {
+    _id: "exposition:beta-owned",
+    entreprise: "entreprise:beta",
+  },
+  "exposition:globex-owned": {
+    _id: "exposition:globex-owned",
+    entreprise: "entreprise:globex",
+  },
 };
 
 const participantOf = resource({
@@ -59,8 +66,7 @@ const membershipsOf = indirectResource({
 
 // ─── Successful-only grants for indirect filter — regression guard
 
-
-Deno.test("edge: grant rejected by cap-mode rule does NOT disable indirect filter", async () => {
+test("edge: grant rejected by cap-mode rule does NOT disable indirect filter", async () => {
   // Two providers emit grants for the same permission. One has a
   // with-clause on an auxiliary resource (exposition) — rejected via
   // cap-mode auto-fetch when the doc doesn't match. The other carries
@@ -70,42 +76,42 @@ Deno.test("edge: grant rejected by cap-mode rule does NOT disable indirect filte
     schema: {
       "expo.participants.list": permission({
         target: target.path("exposition", "participant"),
-      }).rules([
-        expoOf.match(),
-        participantOf.match(),
-        membershipsOf.match(),
-      ]),
+      }).rules([expoOf.match(), participantOf.match(), membershipsOf.match()]),
     },
-    providers: [() => [
-      // Auxiliary-resource grant : wants ALL participants of expos
-      // belonging to a specific tenant — rejected when the request's
-      // expo doesn't match (cap-mode auto-fetch evaluates the with).
-      {
-        id: "g-aux-rejected",
-        key: "expo.participants.list",
-        target: ["exposition:*", "participant:*"],
-        with: { exposition: { entreprise: "entreprise:beta" } },
-      },
-      // Indirect-scoped grant : restrict to participants of a specific
-      // organization.
-      {
-        id: "g-indirect",
-        key: "expo.participants.list",
-        target: ["exposition:*", "participant:*"],
-        with: {
-          memberships_of_participant: {
-            organizationId: "expo_organization:beta-on-globex-expo",
-            status: "active",
+    providers: [
+      () => [
+        // Auxiliary-resource grant : wants ALL participants of expos
+        // belonging to a specific tenant — rejected when the request's
+        // expo doesn't match (cap-mode auto-fetch evaluates the with).
+        {
+          id: "g-aux-rejected",
+          key: "expo.participants.list",
+          target: ["exposition:*", "participant:*"],
+          with: { exposition: { entreprise: "entreprise:beta" } },
+        },
+        // Indirect-scoped grant : restrict to participants of a specific
+        // organization.
+        {
+          id: "g-indirect",
+          key: "expo.participants.list",
+          target: ["exposition:*", "participant:*"],
+          with: {
+            memberships_of_participant: {
+              organizationId: "expo_organization:beta-on-globex-expo",
+              status: "active",
+            },
           },
         },
-      },
-    ]],
+      ],
+    ],
   });
 
-  const r = await sys.context({ subject: { id: "user:1" } }).can(
-    "expo.participants.list",
-    ["exposition:globex-owned", "participant:*"],
-  );
+  const r = await sys
+    .context({ subject: { id: "user:1" } })
+    .can("expo.participants.list", [
+      "exposition:globex-owned",
+      "participant:*",
+    ]);
 
   assertEquals(r.ok, true, "the indirect grant alone is sufficient");
   if (!r.ok || !r.stages) throw new Error("expected stages");
@@ -113,7 +119,13 @@ Deno.test("edge: grant rejected by cap-mode rule does NOT disable indirect filte
   // The indirect filter must remain in the pipeline. The rejected
   // sibling grant must NOT have triggered any-wins.
   const lastMatch = r.stages[r.stages.length - 1] as
-    | { $match?: { _memberships_of_participant?: { $elemMatch?: Record<string, unknown> } } }
+    | {
+        $match?: {
+          _memberships_of_participant?: {
+            $elemMatch?: Record<string, unknown>;
+          };
+        };
+      }
     | undefined;
   assertEquals(
     lastMatch?.$match?._memberships_of_participant?.$elemMatch?.organizationId,
@@ -122,7 +134,7 @@ Deno.test("edge: grant rejected by cap-mode rule does NOT disable indirect filte
   assertEquals(r.matchedGrants, ["g-indirect"]);
 });
 
-Deno.test("edge: grant truly open (rules all pass, no indirect ref) DOES trigger any-wins", async () => {
+test("edge: grant truly open (rules all pass, no indirect ref) DOES trigger any-wins", async () => {
   // Inverse scenario : the auxiliary-resource grant PASSES (the expo
   // matches the with-clause) AND has no indirect reference. Legitimate
   // any-wins : a global admin can see everything despite a sibling
@@ -131,31 +143,29 @@ Deno.test("edge: grant truly open (rules all pass, no indirect ref) DOES trigger
     schema: {
       "expo.participants.list": permission({
         target: target.path("exposition", "participant"),
-      }).rules([
-        expoOf.match(),
-        participantOf.match(),
-        membershipsOf.match(),
-      ]),
+      }).rules([expoOf.match(), participantOf.match(), membershipsOf.match()]),
     },
-    providers: [() => [
-      {
-        id: "g-manage-entreprise",
-        key: "expo.participants.list",
-        target: ["exposition:*", "participant:*"],
-        with: { exposition: { entreprise: "entreprise:beta" } },
-      },
-      {
-        id: "g-org-membership",
-        key: "expo.participants.list",
-        target: ["exposition:*", "participant:*"],
-        with: {
-          memberships_of_participant: {
-            organizationId: "expo_organization:beta",
-            status: "active",
+    providers: [
+      () => [
+        {
+          id: "g-manage-entreprise",
+          key: "expo.participants.list",
+          target: ["exposition:*", "participant:*"],
+          with: { exposition: { entreprise: "entreprise:beta" } },
+        },
+        {
+          id: "g-org-membership",
+          key: "expo.participants.list",
+          target: ["exposition:*", "participant:*"],
+          with: {
+            memberships_of_participant: {
+              organizationId: "expo_organization:beta",
+              status: "active",
+            },
           },
         },
-      },
-    ]],
+      ],
+    ],
   });
 
   const r = await sys.context({ subject: { id: "user:1" } }).can(
@@ -168,14 +178,10 @@ Deno.test("edge: grant truly open (rules all pass, no indirect ref) DOES trigger
   // the indirect → any-wins kicks in → no indirect filter applied
   // → user sees everything.
   assertEquals("stages" in r, false, "any-wins should disable stages");
-  assertEquals(
-    r.ok ? r.matchedGrants?.length : null,
-    2,
-    "both grants matched",
-  );
+  assertEquals(r.ok ? r.matchedGrants?.length : null, 2, "both grants matched");
 });
 
-Deno.test("edge: all grants rejected → CanResult.ok = false", async () => {
+test("edge: all grants rejected → CanResult.ok = false", async () => {
   // Sanity : if every grant fails its rules, the can() returns ok:false.
   const sys = createSystem({
     schema: {
@@ -183,25 +189,29 @@ Deno.test("edge: all grants rejected → CanResult.ok = false", async () => {
         target: target.path("exposition", "participant"),
       }).rules([expoOf.match(), participantOf.match()]),
     },
-    providers: [() => [
-      {
-        id: "g-wrong-entreprise",
-        key: "expo.participants.list",
-        target: ["exposition:*", "participant:*"],
-        with: { exposition: { entreprise: "entreprise:beta" } },
-      },
-    ]],
+    providers: [
+      () => [
+        {
+          id: "g-wrong-entreprise",
+          key: "expo.participants.list",
+          target: ["exposition:*", "participant:*"],
+          with: { exposition: { entreprise: "entreprise:beta" } },
+        },
+      ],
+    ],
   });
 
-  const r = await sys.context({ subject: { id: "user:1" } }).can(
-    "expo.participants.list",
-    ["exposition:globex-owned", "participant:*"],
-  );
+  const r = await sys
+    .context({ subject: { id: "user:1" } })
+    .can("expo.participants.list", [
+      "exposition:globex-owned",
+      "participant:*",
+    ]);
 
   assertEquals(r.ok, false);
 });
 
-Deno.test("edge: indirect + auto-fetch in same perm — both work together", async () => {
+test("edge: indirect + auto-fetch in same perm — both work together", async () => {
   // The expo grant has BOTH a with on the auxiliary resource (exposition)
   // AND an indirect ref. The indirect filter should be applied, and the
   // auxiliary check should also be evaluated correctly.
@@ -209,42 +219,45 @@ Deno.test("edge: indirect + auto-fetch in same perm — both work together", asy
     schema: {
       "expo.participants.list": permission({
         target: target.path("exposition", "participant"),
-      }).rules([
-        expoOf.match(),
-        participantOf.match(),
-        membershipsOf.match(),
-      ]),
+      }).rules([expoOf.match(), participantOf.match(), membershipsOf.match()]),
     },
-    providers: [() => [
-      {
-        id: "g-combo",
-        key: "expo.participants.list",
-        target: ["exposition:*", "participant:*"],
-        with: {
-          // expo check must pass (Beta owns this expo)
-          exposition: { entreprise: "entreprise:beta" },
-          // AND filter by indirect
-          memberships_of_participant: {
-            organizationId: "expo_organization:beta",
-            status: "active",
+    providers: [
+      () => [
+        {
+          id: "g-combo",
+          key: "expo.participants.list",
+          target: ["exposition:*", "participant:*"],
+          with: {
+            // expo check must pass (Beta owns this expo)
+            exposition: { entreprise: "entreprise:beta" },
+            // AND filter by indirect
+            memberships_of_participant: {
+              organizationId: "expo_organization:beta",
+              status: "active",
+            },
           },
         },
-      },
-    ]],
+      ],
+    ],
   });
 
   // Beta-owned expo → expoOf.match passes → grant successful.
-  const r = await sys.context({ subject: { id: "user:1" } }).can(
-    "expo.participants.list",
-    ["exposition:beta-owned", "participant:*"],
-  );
+  const r = await sys
+    .context({ subject: { id: "user:1" } })
+    .can("expo.participants.list", ["exposition:beta-owned", "participant:*"]);
 
   assertEquals(r.ok, true);
   if (!r.ok || !r.stages) throw new Error("expected stages");
 
   // The indirect filter is applied (only one grant, with indirect ref).
   const lastMatch = r.stages[r.stages.length - 1] as
-    | { $match?: { _memberships_of_participant?: { $elemMatch?: Record<string, unknown> } } }
+    | {
+        $match?: {
+          _memberships_of_participant?: {
+            $elemMatch?: Record<string, unknown>;
+          };
+        };
+      }
     | undefined;
   assertEquals(
     lastMatch?.$match?._memberships_of_participant?.$elemMatch?.organizationId,
@@ -253,14 +266,16 @@ Deno.test("edge: indirect + auto-fetch in same perm — both work together", asy
 
   // Same grant on Globex's expo → expoOf rejects → no successful grants
   // → no stages, ok:false.
-  const r2 = await sys.context({ subject: { id: "user:1" } }).can(
-    "expo.participants.list",
-    ["exposition:globex-owned", "participant:*"],
-  );
+  const r2 = await sys
+    .context({ subject: { id: "user:1" } })
+    .can("expo.participants.list", [
+      "exposition:globex-owned",
+      "participant:*",
+    ]);
   assertEquals(r2.ok, false);
 });
 
-Deno.test("edge: chained indirect — intermediate lookup auto-included even on rejected sibling", async () => {
+test("edge: chained indirect — intermediate lookup auto-included even on rejected sibling", async () => {
   // Regression guard : if a chained indirect is referenced by a successful
   // grant, the intermediate $lookup must still be emitted, even when
   // there's a sibling rejected grant that does NOT reference any indirect.
@@ -295,33 +310,37 @@ Deno.test("edge: chained indirect — intermediate lookup auto-included even on 
         entrepriseMembersOfUser.match(),
       ]),
     },
-    providers: [() => [
-      // Rejected grant : wrong entreprise on a Globex expo.
-      {
-        id: "g-rejected",
-        key: "expo.participants.list",
-        target: ["exposition:*", "participant:*"],
-        with: { exposition: { entreprise: "entreprise:beta" } },
-      },
-      // Successful grant : indirect chain.
-      {
-        id: "g-chained-indirect",
-        key: "expo.participants.list",
-        target: ["exposition:*", "participant:*"],
-        with: {
-          entreprise_members_of_user: {
-            tenantId: "entreprise:beta",
-            status: "active",
+    providers: [
+      () => [
+        // Rejected grant : wrong entreprise on a Globex expo.
+        {
+          id: "g-rejected",
+          key: "expo.participants.list",
+          target: ["exposition:*", "participant:*"],
+          with: { exposition: { entreprise: "entreprise:beta" } },
+        },
+        // Successful grant : indirect chain.
+        {
+          id: "g-chained-indirect",
+          key: "expo.participants.list",
+          target: ["exposition:*", "participant:*"],
+          with: {
+            entreprise_members_of_user: {
+              tenantId: "entreprise:beta",
+              status: "active",
+            },
           },
         },
-      },
-    ]],
+      ],
+    ],
   });
 
-  const r = await sys.context({ subject: { id: "user:1" } }).can(
-    "expo.participants.list",
-    ["exposition:globex-owned", "participant:*"],
-  );
+  const r = await sys
+    .context({ subject: { id: "user:1" } })
+    .can("expo.participants.list", [
+      "exposition:globex-owned",
+      "participant:*",
+    ]);
 
   assertEquals(r.ok, true);
   if (!r.ok || !r.stages) throw new Error("expected stages");

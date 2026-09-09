@@ -13,8 +13,10 @@
  * Requiert un Mongo running sur localhost:27017.
  */
 
-import { assertEquals, assertRejects } from "jsr:@std/assert";
-import { MongoClient } from "npm:mongodb@^6.0.0";
+import { test } from "node:test";
+import process from "node:process";
+import { assertEquals, assertRejects } from "./+assert.ts";
+import { MongoClient } from "mongodb";
 import {
   createSystem,
   indirectResource,
@@ -24,14 +26,14 @@ import {
 } from "../mod.ts";
 
 const MONGO_URL =
-  Deno.env.get("MONGO_URL") ?? "mongodb://localhost:27017/?directConnection=true";
+  process.env.MONGO_URL ?? "mongodb://localhost:27017/?directConnection=true";
 const DB_NAME = "qp_e2e_indirect_resource";
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
 interface TestEnv {
   client: MongoClient;
-  collName: string;  // collection courante (auto-générée par test)
+  collName: string; // collection courante (auto-générée par test)
   cleanup: () => Promise<void>;
 }
 
@@ -65,15 +67,21 @@ async function runPipeline(
 ): Promise<unknown[]> {
   // Substitute <self> placeholder for self-lookups.
   const resolved = stages.map((s) => substituteSelf(s, collName));
-  return await client.db(DB_NAME).collection(collName).aggregate(resolved as never[]).toArray();
+  return await client
+    .db(DB_NAME)
+    .collection(collName)
+    .aggregate(resolved as never[])
+    .toArray();
 }
 
 function substituteSelf(value: unknown, collName: string): unknown {
   if (value === "<self>") return collName;
-  if (Array.isArray(value)) return value.map((v) => substituteSelf(v, collName));
+  if (Array.isArray(value))
+    return value.map((v) => substituteSelf(v, collName));
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value)) out[k] = substituteSelf(v, collName);
+    for (const [k, v] of Object.entries(value))
+      out[k] = substituteSelf(v, collName);
     return out;
   }
   return value;
@@ -88,11 +96,7 @@ const participantOf = resource({
 
 // ─── Cas A — self-lookup org_membership ───────────────────────────────
 
-Deno.test({
-  name: "e2e cas A — self-lookup ramène les participants membres de l'org Acme",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("e2e cas A — self-lookup ramène les participants membres de l'org Acme", async () => {
   await withMongo(async ({ client, collName }) => {
     const coll = client.db(DB_NAME).collection(collName);
 
@@ -141,25 +145,26 @@ Deno.test({
           target: target.path("exposition", "participant"),
         }).rules([membershipsOf.match()]),
       },
-      providers: [() => [
-        {
-          id: "g-acme",
-          key: "participants.list",
-          target: ["exposition:X", "participant:*"],
-          with: {
-            memberships_of_participant: {
-              organizationId: "expo_organization:acme",
-              status: "active",
+      providers: [
+        () => [
+          {
+            id: "g-acme",
+            key: "participants.list",
+            target: ["exposition:X", "participant:*"],
+            with: {
+              memberships_of_participant: {
+                organizationId: "expo_organization:acme",
+                status: "active",
+              },
             },
           },
-        },
-      ]],
+        ],
+      ],
     });
 
-    const r = await sys.context({ subject: { id: "user:lucas" } }).can(
-      "participants.list",
-      ["exposition:X", "participant:*"],
-    );
+    const r = await sys
+      .context({ subject: { id: "user:lucas" } })
+      .can("participants.list", ["exposition:X", "participant:*"]);
 
     assertEquals(r.ok, true);
     if (!r.ok || !r.stages) throw new Error("expected stages");
@@ -179,11 +184,7 @@ Deno.test({
   });
 });
 
-Deno.test({
-  name: "e2e cas A — cross-grant fusion (deux orgs) ramène les participants des deux",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("e2e cas A — cross-grant fusion (deux orgs) ramène les participants des deux", async () => {
   await withMongo(async ({ client, collName }) => {
     const coll = client.db(DB_NAME).collection(collName);
 
@@ -193,10 +194,34 @@ Deno.test({
       { _id: "participant:p3", _type: "participant" },
       { _id: "participant:p4", _type: "participant" },
       // p1, p3 → Acme ; p2 → Globex ; p4 → Initech (hors scope)
-      { _id: "om:m1", _type: "org_membership", participantId: "participant:p1", organizationId: "expo_organization:acme", status: "active" },
-      { _id: "om:m2", _type: "org_membership", participantId: "participant:p2", organizationId: "expo_organization:globex", status: "active" },
-      { _id: "om:m3", _type: "org_membership", participantId: "participant:p3", organizationId: "expo_organization:acme", status: "active" },
-      { _id: "om:m4", _type: "org_membership", participantId: "participant:p4", organizationId: "expo_organization:initech", status: "active" },
+      {
+        _id: "om:m1",
+        _type: "org_membership",
+        participantId: "participant:p1",
+        organizationId: "expo_organization:acme",
+        status: "active",
+      },
+      {
+        _id: "om:m2",
+        _type: "org_membership",
+        participantId: "participant:p2",
+        organizationId: "expo_organization:globex",
+        status: "active",
+      },
+      {
+        _id: "om:m3",
+        _type: "org_membership",
+        participantId: "participant:p3",
+        organizationId: "expo_organization:acme",
+        status: "active",
+      },
+      {
+        _id: "om:m4",
+        _type: "org_membership",
+        participantId: "participant:p4",
+        organizationId: "expo_organization:initech",
+        status: "active",
+      },
     ] as never[]);
 
     const membershipsOf = indirectResource({
@@ -213,18 +238,37 @@ Deno.test({
           target: target.path("exposition", "participant"),
         }).rules([membershipsOf.match()]),
       },
-      providers: [() => [
-        { id: "g-acme", key: "participants.list", target: ["exposition:X", "participant:*"],
-          with: { memberships_of_participant: { organizationId: "expo_organization:acme", status: "active" } } },
-        { id: "g-globex", key: "participants.list", target: ["exposition:X", "participant:*"],
-          with: { memberships_of_participant: { organizationId: "expo_organization:globex", status: "active" } } },
-      ]],
+      providers: [
+        () => [
+          {
+            id: "g-acme",
+            key: "participants.list",
+            target: ["exposition:X", "participant:*"],
+            with: {
+              memberships_of_participant: {
+                organizationId: "expo_organization:acme",
+                status: "active",
+              },
+            },
+          },
+          {
+            id: "g-globex",
+            key: "participants.list",
+            target: ["exposition:X", "participant:*"],
+            with: {
+              memberships_of_participant: {
+                organizationId: "expo_organization:globex",
+                status: "active",
+              },
+            },
+          },
+        ],
+      ],
     });
 
-    const r = await sys.context({ subject: { id: "user:lucas" } }).can(
-      "participants.list",
-      ["exposition:X", "participant:*"],
-    );
+    const r = await sys
+      .context({ subject: { id: "user:lucas" } })
+      .can("participants.list", ["exposition:X", "participant:*"]);
     if (!r.ok || !r.stages) throw new Error("expected stages");
 
     const stagesScoped = [
@@ -241,26 +285,40 @@ Deno.test({
 
 // ─── Cas D — cross-collection ─────────────────────────────────────────
 
-Deno.test({
-  name: "e2e cas D — cross-collection lookup vers `users` global",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("e2e cas D — cross-collection lookup vers `users` global", async () => {
   await withMongo(async ({ client, collName }) => {
     const usersColl = `${collName}_users`;
     const participantsColl = collName;
 
     try {
-      await client.db(DB_NAME).collection(participantsColl).insertMany([
-        { _id: "participant:p1", _type: "participant", personRef: { userId: "user:lucas" } },
-        { _id: "participant:p2", _type: "participant", personRef: { userId: "user:bob" } },
-        { _id: "participant:p3", _type: "participant", personRef: { userId: "user:carol" } },
-      ] as never[]);
-      await client.db(DB_NAME).collection(usersColl).insertMany([
-        { _id: "user:lucas", entreprise: "entreprise:acme" },
-        { _id: "user:bob", entreprise: "entreprise:globex" },
-        { _id: "user:carol", entreprise: "entreprise:acme" },
-      ] as never[]);
+      await client
+        .db(DB_NAME)
+        .collection(participantsColl)
+        .insertMany([
+          {
+            _id: "participant:p1",
+            _type: "participant",
+            personRef: { userId: "user:lucas" },
+          },
+          {
+            _id: "participant:p2",
+            _type: "participant",
+            personRef: { userId: "user:bob" },
+          },
+          {
+            _id: "participant:p3",
+            _type: "participant",
+            personRef: { userId: "user:carol" },
+          },
+        ] as never[]);
+      await client
+        .db(DB_NAME)
+        .collection(usersColl)
+        .insertMany([
+          { _id: "user:lucas", entreprise: "entreprise:acme" },
+          { _id: "user:bob", entreprise: "entreprise:globex" },
+          { _id: "user:carol", entreprise: "entreprise:acme" },
+        ] as never[]);
 
       const userOfParticipant = indirectResource({
         id: "user_of_participant",
@@ -279,16 +337,21 @@ Deno.test({
             target: target.path("exposition", "participant"),
           }).rules([userOfParticipant.match()]),
         },
-        providers: [() => [
-          { id: "g", key: "participants.list", target: ["exposition:X", "participant:*"],
-            with: { user_of_participant: { entreprise: "entreprise:acme" } } },
-        ]],
+        providers: [
+          () => [
+            {
+              id: "g",
+              key: "participants.list",
+              target: ["exposition:X", "participant:*"],
+              with: { user_of_participant: { entreprise: "entreprise:acme" } },
+            },
+          ],
+        ],
       });
 
-      const r = await sys.context({ subject: { id: "user:lucas" } }).can(
-        "participants.list",
-        ["exposition:X", "participant:*"],
-      );
+      const r = await sys
+        .context({ subject: { id: "user:lucas" } })
+        .can("participants.list", ["exposition:X", "participant:*"]);
       if (!r.ok || !r.stages) throw new Error("expected stages");
 
       const stagesScoped = [
@@ -303,54 +366,101 @@ Deno.test({
     } finally {
       try {
         await client.db(DB_NAME).dropCollection(usersColl);
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
     }
   });
 });
 
 // ─── Cas B — chaîne 2 niveaux ─────────────────────────────────────────
 
-Deno.test({
-  name: "e2e cas B — chaîne participant → user → entreprise_member",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("e2e cas B — chaîne participant → user → entreprise_member", async () => {
   await withMongo(async ({ client, collName }) => {
     const usersColl = `${collName}_users`;
     const membersColl = `${collName}_members`;
 
     try {
-      await client.db(DB_NAME).collection(collName).insertMany([
-        { _id: "participant:p1", _type: "participant", personRef: { userId: "user:lucas" } },
-        { _id: "participant:p2", _type: "participant", personRef: { userId: "user:bob" } },
-        { _id: "participant:p3", _type: "participant", personRef: { userId: "user:carol" } },
-      ] as never[]);
-      await client.db(DB_NAME).collection(usersColl).insertMany([
-        { _id: "user:lucas" },
-        { _id: "user:bob" },
-        { _id: "user:carol" },
-      ] as never[]);
-      await client.db(DB_NAME).collection(membersColl).insertMany([
-        // Lucas → Acme (active)
-        { _id: "em:1", userId: "user:lucas", tenantId: "entreprise:acme", status: "active" },
-        // Carol → Acme (active aussi)
-        { _id: "em:2", userId: "user:carol", tenantId: "entreprise:acme", status: "active" },
-        // Bob → Globex (active, donc hors scope Acme)
-        { _id: "em:3", userId: "user:bob", tenantId: "entreprise:globex", status: "active" },
-        // Carol → Acme mais removed (doublon avec em:2)
-        { _id: "em:4", userId: "user:carol", tenantId: "entreprise:acme", status: "removed" },
-      ] as never[]);
+      await client
+        .db(DB_NAME)
+        .collection(collName)
+        .insertMany([
+          {
+            _id: "participant:p1",
+            _type: "participant",
+            personRef: { userId: "user:lucas" },
+          },
+          {
+            _id: "participant:p2",
+            _type: "participant",
+            personRef: { userId: "user:bob" },
+          },
+          {
+            _id: "participant:p3",
+            _type: "participant",
+            personRef: { userId: "user:carol" },
+          },
+        ] as never[]);
+      await client
+        .db(DB_NAME)
+        .collection(usersColl)
+        .insertMany([
+          { _id: "user:lucas" },
+          { _id: "user:bob" },
+          { _id: "user:carol" },
+        ] as never[]);
+      await client
+        .db(DB_NAME)
+        .collection(membersColl)
+        .insertMany([
+          // Lucas → Acme (active)
+          {
+            _id: "em:1",
+            userId: "user:lucas",
+            tenantId: "entreprise:acme",
+            status: "active",
+          },
+          // Carol → Acme (active aussi)
+          {
+            _id: "em:2",
+            userId: "user:carol",
+            tenantId: "entreprise:acme",
+            status: "active",
+          },
+          // Bob → Globex (active, donc hors scope Acme)
+          {
+            _id: "em:3",
+            userId: "user:bob",
+            tenantId: "entreprise:globex",
+            status: "active",
+          },
+          // Carol → Acme mais removed (doublon avec em:2)
+          {
+            _id: "em:4",
+            userId: "user:carol",
+            tenantId: "entreprise:acme",
+            status: "removed",
+          },
+        ] as never[]);
 
       const userOfParticipant = indirectResource({
         id: "user_of_participant",
         from: participantOf,
-        on: { localField: "personRef.userId", foreignField: "_id", foreignCollection: usersColl },
+        on: {
+          localField: "personRef.userId",
+          foreignField: "_id",
+          foreignCollection: usersColl,
+        },
         cardinality: "one",
       });
       const entrepriseMembersOfUser = indirectResource({
         id: "entreprise_members_of_user",
         from: userOfParticipant,
-        on: { localField: "_id", foreignField: "userId", foreignCollection: membersColl },
+        on: {
+          localField: "_id",
+          foreignField: "userId",
+          foreignCollection: membersColl,
+        },
         cardinality: "many",
       });
 
@@ -363,16 +473,26 @@ Deno.test({
             entrepriseMembersOfUser.match(),
           ]),
         },
-        providers: [() => [
-          { id: "g", key: "participants.list", target: ["exposition:X", "participant:*"],
-            with: { entreprise_members_of_user: { tenantId: "entreprise:acme", status: "active" } } },
-        ]],
+        providers: [
+          () => [
+            {
+              id: "g",
+              key: "participants.list",
+              target: ["exposition:X", "participant:*"],
+              with: {
+                entreprise_members_of_user: {
+                  tenantId: "entreprise:acme",
+                  status: "active",
+                },
+              },
+            },
+          ],
+        ],
       });
 
-      const r = await sys.context({ subject: { id: "user:lucas" } }).can(
-        "participants.list",
-        ["exposition:X", "participant:*"],
-      );
+      const r = await sys
+        .context({ subject: { id: "user:lucas" } })
+        .can("participants.list", ["exposition:X", "participant:*"]);
       if (!r.ok || !r.stages) throw new Error("expected stages");
 
       const stagesScoped = [
@@ -386,7 +506,11 @@ Deno.test({
       assertEquals(ids, ["participant:p1", "participant:p3"]);
     } finally {
       for (const c of [usersColl, membersColl]) {
-        try { await client.db(DB_NAME).dropCollection(c); } catch { /* noop */ }
+        try {
+          await client.db(DB_NAME).dropCollection(c);
+        } catch {
+          /* noop */
+        }
       }
     }
   });
@@ -394,11 +518,7 @@ Deno.test({
 
 // ─── Sécurité — validateSpec sur les specs indirect ───────────────────
 
-Deno.test({
-  name: "e2e sécurité — un grant qui pousse $where dans le with indirect est rejeté",
-  sanitizeResources: false,
-  sanitizeOps: false,
-}, async () => {
+test("e2e sécurité — un grant qui pousse $where dans le with indirect est rejeté", async () => {
   const membershipsOf = indirectResource({
     id: "memberships_of_participant",
     from: participantOf,
@@ -413,22 +533,28 @@ Deno.test({
         target: target.path("exposition", "participant"),
       }).rules([membershipsOf.match()]),
     },
-    providers: [() => [
-      {
-        id: "g-evil",
-        key: "participants.list",
-        target: ["exposition:X", "participant:*"],
-        // $where = arbitrary JS execution server-side. MUST be rejected.
-        with: { memberships_of_participant: { $where: "function() { return true; }" } },
-      },
-    ]],
+    providers: [
+      () => [
+        {
+          id: "g-evil",
+          key: "participants.list",
+          target: ["exposition:X", "participant:*"],
+          // $where = arbitrary JS execution server-side. MUST be rejected.
+          with: {
+            memberships_of_participant: {
+              $where: "function() { return true; }",
+            },
+          },
+        },
+      ],
+    ],
   });
 
   await assertRejects(
-    () => sys.context({ subject: { id: "user:lucas" } }).can(
-      "participants.list",
-      ["exposition:X", "participant:*"],
-    ),
+    () =>
+      sys
+        .context({ subject: { id: "user:lucas" } })
+        .can("participants.list", ["exposition:X", "participant:*"]),
     Error,
     "$where",
   );

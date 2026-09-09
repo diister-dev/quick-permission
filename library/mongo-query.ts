@@ -22,33 +22,33 @@
  *  2. Filtrer une collection MongoDB en pushdown (la spec EST déjà du Mongo)
  */
 
-import sift from './sift/index.ts';
+import sift from "./sift/index.ts";
 
 const ALLOWED_OPERATORS: ReadonlySet<string> = new Set([
-	// Comparison
-	'$eq',
-	'$ne',
-	'$in',
-	'$nin',
-	'$gt',
-	'$gte',
-	'$lt',
-	'$lte',
-	// Existence / type
-	'$exists',
-	'$type',
-	// Logical
-	'$and',
-	'$or',
-	'$nor',
-	'$not',
-	// String
-	'$regex',
-	'$options',
-	// Array
-	'$all',
-	'$elemMatch',
-	'$size',
+  // Comparison
+  "$eq",
+  "$ne",
+  "$in",
+  "$nin",
+  "$gt",
+  "$gte",
+  "$lt",
+  "$lte",
+  // Existence / type
+  "$exists",
+  "$type",
+  // Logical
+  "$and",
+  "$or",
+  "$nor",
+  "$not",
+  // String
+  "$regex",
+  "$options",
+  // Array
+  "$all",
+  "$elemMatch",
+  "$size",
 ]);
 
 export type MongoSpec = Record<string, unknown>;
@@ -60,23 +60,27 @@ export type MongoSpec = Record<string, unknown>;
  * À appeler à la création du grant (validation côté API) ou au pire au
  * check time, pour empêcher l'exécution de code arbitraire.
  */
-export function validateSpec(spec: unknown, path = '$'): void {
-	if (spec === null || typeof spec !== 'object') return;
-	if (Array.isArray(spec)) {
-		spec.forEach((item, i) => validateSpec(item, `${path}[${i}]`));
-		return;
-	}
-	for (const [key, value] of Object.entries(spec as object)) {
-		if (key.startsWith('$')) {
-			if (!ALLOWED_OPERATORS.has(key)) {
-				throw new Error(
-					`Forbidden Mongo operator at ${path}: "${key}". ` +
-						`Allowed: ${[...ALLOWED_OPERATORS].join(', ')}`,
-				);
-			}
-		}
-		validateSpec(value, `${path}.${key}`);
-	}
+export function validateSpec(spec: unknown, path = "$"): void {
+  if (spec === null || typeof spec !== "object") return;
+  if (Array.isArray(spec)) {
+    // A `for` loop, not `forEach`: the arrow's implicit return handed back
+    // validateSpec's value, which the iteration then discarded.
+    for (const [i, item] of spec.entries()) {
+      validateSpec(item, `${path}[${i}]`);
+    }
+    return;
+  }
+  for (const [key, value] of Object.entries(spec as object)) {
+    if (key.startsWith("$")) {
+      if (!ALLOWED_OPERATORS.has(key)) {
+        throw new Error(
+          `Forbidden Mongo operator at ${path}: "${key}". ` +
+            `Allowed: ${[...ALLOWED_OPERATORS].join(", ")}`,
+        );
+      }
+    }
+    validateSpec(value, `${path}.${key}`);
+  }
 }
 
 /**
@@ -84,7 +88,7 @@ export function validateSpec(spec: unknown, path = '$'): void {
  * rejeter tout opérateur non-whitelisté.
  */
 export function evaluateSpec(spec: MongoSpec, doc: unknown): boolean {
-	validateSpec(spec);
-	// deno-lint-ignore no-explicit-any
-	return (sift as any)(spec)(doc);
+  validateSpec(spec);
+  // deno-lint-ignore no-explicit-any
+  return (sift as any)(spec)(doc);
 }

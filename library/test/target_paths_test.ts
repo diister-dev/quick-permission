@@ -1,10 +1,6 @@
-import { assertEquals } from "jsr:@std/assert";
-import {
-  createSystem,
-  permission,
-  resource,
-  target,
-} from "../mod.ts";
+import { test } from "node:test";
+import { assertEquals } from "./+assert.ts";
+import { createSystem, permission, resource, target } from "../mod.ts";
 
 const expoOf = resource({
   id: "exposition",
@@ -27,96 +23,110 @@ function makeSystem(grants: { id: string; target: readonly unknown[] }[]) {
     schema: {
       "registrations.read": permission({
         target: target.path("exposition", "program", "registration"),
-      }).rules([
-        expoOf.match(),
-        programOf.match(),
-        regOf.match(),
-      ]),
+      }).rules([expoOf.match(), programOf.match(), regOf.match()]),
     },
-    providers: [() =>
-      grants.map((g) => ({
-        ...g,
-        key: "registrations.read" as const,
-      }))],
+    providers: [
+      () =>
+        grants.map((g) => ({
+          ...g,
+          key: "registrations.read" as const,
+        })),
+    ],
   });
 }
 
-Deno.test("path 3 segments : grant exact matche le request exact", async () => {
+test("path 3 segments : grant exact matche le request exact", async () => {
   const sys = makeSystem([
     { id: "g1", target: ["exposition:e1", "program:p7", "registration:r1"] },
   ]);
-  const r = await sys.context({ subject: { id: "user:1" } }).can(
-    "registrations.read",
-    ["exposition:e1", "program:p7", "registration:r1"],
-  );
+  const r = await sys
+    .context({ subject: { id: "user:1" } })
+    .can("registrations.read", [
+      "exposition:e1",
+      "program:p7",
+      "registration:r1",
+    ]);
   assertEquals(r.ok, true);
 });
 
-Deno.test("path 3 segments : wildcard sur le dernier segment matche n'importe quelle reg", async () => {
+test("path 3 segments : wildcard sur le dernier segment matche n'importe quelle reg", async () => {
   const sys = makeSystem([
     { id: "g1", target: ["exposition:e1", "program:p7", "registration:*"] },
   ]);
-  const r1 = await sys.context({ subject: { id: "user:1" } }).can(
-    "registrations.read",
-    ["exposition:e1", "program:p7", "registration:r1"],
-  );
-  const r2 = await sys.context({ subject: { id: "user:1" } }).can(
-    "registrations.read",
-    ["exposition:e1", "program:p7", "registration:r99"],
-  );
+  const r1 = await sys
+    .context({ subject: { id: "user:1" } })
+    .can("registrations.read", [
+      "exposition:e1",
+      "program:p7",
+      "registration:r1",
+    ]);
+  const r2 = await sys
+    .context({ subject: { id: "user:1" } })
+    .can("registrations.read", [
+      "exposition:e1",
+      "program:p7",
+      "registration:r99",
+    ]);
   assertEquals(r1.ok, true);
   assertEquals(r2.ok, true);
 });
 
-Deno.test("path 3 segments : wildcard milieu+fin couvre toutes les regs de l'expo", async () => {
+test("path 3 segments : wildcard milieu+fin couvre toutes les regs de l'expo", async () => {
   const sys = makeSystem([
     { id: "g1", target: ["exposition:e1", "program:*", "registration:*"] },
   ]);
-  const r1 = await sys.context({ subject: { id: "user:1" } }).can(
-    "registrations.read",
-    ["exposition:e1", "program:p7", "registration:r1"],
-  );
-  const r2 = await sys.context({ subject: { id: "user:1" } }).can(
-    "registrations.read",
-    ["exposition:e1", "program:p99", "registration:r42"],
-  );
+  const r1 = await sys
+    .context({ subject: { id: "user:1" } })
+    .can("registrations.read", [
+      "exposition:e1",
+      "program:p7",
+      "registration:r1",
+    ]);
+  const r2 = await sys
+    .context({ subject: { id: "user:1" } })
+    .can("registrations.read", [
+      "exposition:e1",
+      "program:p99",
+      "registration:r42",
+    ]);
   assertEquals(r1.ok, true);
   assertEquals(r2.ok, true);
 });
 
-Deno.test("path 3 segments : exposition différente = pas de match", async () => {
+test("path 3 segments : exposition différente = pas de match", async () => {
   const sys = makeSystem([
     { id: "g1", target: ["exposition:e1", "program:*", "registration:*"] },
   ]);
-  const r = await sys.context({ subject: { id: "user:1" } }).can(
-    "registrations.read",
-    ["exposition:e2", "program:p1", "registration:r1"],
-  );
+  const r = await sys
+    .context({ subject: { id: "user:1" } })
+    .can("registrations.read", [
+      "exposition:e2",
+      "program:p1",
+      "registration:r1",
+    ]);
   assertEquals(r.ok, false);
 });
 
-Deno.test("validation arity : trop court = denied", async () => {
+test("validation arity : trop court = denied", async () => {
   const sys = makeSystem([{ id: "g", target: ["e:*", "p:*", "r:*"] }]);
-  const r = await sys.context({ subject: { id: "user:1" } }).can(
-    "registrations.read",
-    ["exposition:e1", "program:p7"],
-  );
+  const r = await sys
+    .context({ subject: { id: "user:1" } })
+    .can("registrations.read", ["exposition:e1", "program:p7"]);
   assertEquals(r.ok, false);
   if (!r.ok) {
     assertEquals(r.reasons[0].includes("arity"), true);
   }
 });
 
-Deno.test("validation arity : trop long = denied", async () => {
+test("validation arity : trop long = denied", async () => {
   const sys = makeSystem([{ id: "g", target: ["e:*", "p:*", "r:*"] }]);
-  const r = await sys.context({ subject: { id: "user:1" } }).can(
-    "registrations.read",
-    ["e:1", "p:1", "r:1", "extra"],
-  );
+  const r = await sys
+    .context({ subject: { id: "user:1" } })
+    .can("registrations.read", ["e:1", "p:1", "r:1", "extra"]);
   assertEquals(r.ok, false);
 });
 
-Deno.test("target.required : actual=1 segment", async () => {
+test("target.required : actual=1 segment", async () => {
   const userOf = resource({
     id: "user",
     fetch: ({ target }) => ({ _id: target[0] }),
@@ -130,26 +140,26 @@ Deno.test("target.required : actual=1 segment", async () => {
     },
     providers: [() => [{ key: "users.read", target: ["user:*"] }]],
   });
-  const r = await sys.context({ subject: { id: "user:1" } }).can(
-    "users.read",
-    ["user:abc"],
-  );
+  const r = await sys
+    .context({ subject: { id: "user:1" } })
+    .can("users.read", ["user:abc"]);
   assertEquals(r.ok, true);
 
-  const wrong = await sys.context({ subject: { id: "user:1" } }).can(
-    "users.read",
-    ["user:abc", "extra"],
-  );
+  const wrong = await sys
+    .context({ subject: { id: "user:1" } })
+    .can("users.read", ["user:abc", "extra"]);
   assertEquals(wrong.ok, false);
 });
 
-Deno.test("target.none : actual=0 segments, no target arg passes", async () => {
+test("target.none : actual=0 segments, no target arg passes", async () => {
   const sys = createSystem({
     schema: {
       "users.create": permission({ target: target.none() }).rules([]),
     },
     providers: [() => [{ key: "users.create" }]],
   });
-  const r = await sys.context({ subject: { id: "user:1" } }).can("users.create");
+  const r = await sys
+    .context({ subject: { id: "user:1" } })
+    .can("users.create");
   assertEquals(r.ok, true);
 });

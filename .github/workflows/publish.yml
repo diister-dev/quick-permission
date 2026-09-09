@@ -1,11 +1,22 @@
 name: Publish
+
+# Tag or manual only — this used to publish on every push to main, so a merged
+# README fix was a release.
 on:
   push:
-    branches:
-      - main
-      - develop
-      - release/*
+    tags:
+      - 'v*'
   workflow_dispatch:
+    inputs:
+      registry:
+        description: Which registry to publish to
+        type: choice
+        options: [both, npm, jsr]
+        default: both
+
+defaults:
+  run:
+    working-directory: library
 
 jobs:
   publish:
@@ -16,20 +27,58 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      # If develop add -beta to version
-      - name: Set version for develop branch
-        if: github.ref == 'refs/heads/develop'
-        working-directory: library
-        run: |
-          jq '.version += "-beta.${{ github.run_number }}"' deno.json > tmp.$$.json && mv tmp.$$.json deno.json
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
 
-      - name: Publish package
-        working-directory: library
+      # No NODE_AUTH_TOKEN: authentication is OIDC via the trusted publisher
+      # configured on npmjs.com, which also makes provenance automatic.
+      - uses: actions/setup-node@v7
+        with:
+          # 24 ships npm 11.19, past trusted publishing's 11.5.1 floor.
+          # (CI pins 22.18 instead, to test at the engines floor.)
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - run: bun install --frozen-lockfile
+
+      - name: Verify before publishing
         run: |
-          if [ "${{ github.ref }}" = "refs/heads/develop" ]; then
-            npx jsr publish --allow-dirty
-          else
-            npx jsr publish
+          bun run check
+          bun run lint
+          bun test
+          bun run build
+
+      - name: Refuse to publish a version that is not the tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          manifest="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$manifest" ]; then
+            echo "tag $tag does not match package.json version $manifest" >&2
+            exit 1
           fi
+
+      # Staged, not direct: the version lands in a pending state and only goes
+      # live once a maintainer runs `npm stage approve <id>` and clears a 2FA
+      # challenge. A compromised workflow therefore cannot ship anything.
+      - name: Stage the npm release
+        if: inputs.registry != 'jsr'
+        # npm tags "latest" whatever the version says, so the dist-tag comes
+        # from the version's own prerelease identifier instead.
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          case "$version" in
+            *-*) tag="$(printf '%s' "${version#*-}" | cut -d. -f1)" ;;
+            *)   tag="latest" ;;
+          esac
+          echo "staging $version under dist-tag '$tag'"
+          npm stage publish --access public --tag "$tag"
+          echo "Staged. Release it with: npm stage list && npm stage approve <id>"
+
+      - name: Publish to JSR
+        if: inputs.registry != 'npm'
+        run: npx jsr publish

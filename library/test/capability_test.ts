@@ -6,10 +6,11 @@
  * non-vérifiables. Sémantique : "ai-je au moins un grant en principe ?"
  */
 
-import { assertEquals } from "jsr:@std/assert";
+import { test } from "node:test";
+import { assertEquals } from "./+assert.ts";
 import { createSystem, permission, resource, target } from "../mod.ts";
 
-Deno.test("capability query : ne déclenche PAS le fetch (wildcard target)", async () => {
+test("capability query : ne déclenche PAS le fetch (wildcard target)", async () => {
   let fetches = 0;
   const roleOf = resource({
     id: "role",
@@ -34,15 +35,14 @@ Deno.test("capability query : ne déclenche PAS le fetch (wildcard target)", asy
     providers: [() => [{ key: "roles.read", target: ["role:*"] }]],
   });
 
-  const r = await sys.context({ subject: { id: "user:1" } }).can(
-    "roles.read",
-    ["role:*"],
-  );
+  const r = await sys
+    .context({ subject: { id: "user:1" } })
+    .can("roles.read", ["role:*"]);
   assertEquals(r.ok, true);
   assertEquals(fetches, 0);
 });
 
-Deno.test("capability query : match avec spec → ok + constraint exposed for pushdown", async () => {
+test("capability query : match avec spec → ok + constraint exposed for pushdown", async () => {
   const roleOf = resource({
     id: "role",
     fetch: () => ({ _id: "role:concrete", level: "admin" }),
@@ -55,24 +55,27 @@ Deno.test("capability query : match avec spec → ok + constraint exposed for pu
         roleOf.match(),
       ]),
     },
-    providers: [() => [{
-      key: "roles.read",
-      target: ["role:*"],
-      with: { role: { level: "admin" } },
-    }]],
+    providers: [
+      () => [
+        {
+          key: "roles.read",
+          target: ["role:*"],
+          with: { role: { level: "admin" } },
+        },
+      ],
+    ],
   });
 
-  const r = await sys.context({ subject: { id: "user:1" } }).can(
-    "roles.read",
-    ["role:*"],
-  );
+  const r = await sys
+    .context({ subject: { id: "user:1" } })
+    .can("roles.read", ["role:*"]);
   assertEquals(r.ok, true);
   if (r.ok) {
     assertEquals(r.constraints, { level: "admin" });
   }
 });
 
-Deno.test("capability query : grant sans contraintes ⇒ ok (matrix UI use-case)", async () => {
+test("capability query : grant sans contraintes ⇒ ok (matrix UI use-case)", async () => {
   const roleOf = resource({
     id: "role",
     fetch: () => {
@@ -88,20 +91,21 @@ Deno.test("capability query : grant sans contraintes ⇒ ok (matrix UI use-case)
         roleOf.filter(),
       ]),
     },
-    providers: [() => [
-      // Grant simple, sans with/flags → match passe silent, filter passe silent
-      { key: "roles.update", target: ["role:*"] },
-    ]],
+    providers: [
+      () => [
+        // Grant simple, sans with/flags → match passe silent, filter passe silent
+        { key: "roles.update", target: ["role:*"] },
+      ],
+    ],
   });
 
-  const r = await sys.context({ subject: { id: "user:1" } }).can(
-    "roles.update",
-    ["role:*"],
-  );
+  const r = await sys
+    .context({ subject: { id: "user:1" } })
+    .can("roles.update", ["role:*"]);
   assertEquals(r.ok, true);
 });
 
-Deno.test("capability query : require* DENY (need de la ressource)", async () => {
+test("capability query : require* DENY (need de la ressource)", async () => {
   const articleOf = resource({
     id: "article",
     fetch: () => ({ _id: "a", authorId: "user:1" }),
@@ -110,27 +114,32 @@ Deno.test("capability query : require* DENY (need de la ressource)", async () =>
 
   const sys = createSystem({
     schema: {
-      "articles.update": permission({ target: target.required("article") }).rules([
+      "articles.update": permission({
+        target: target.required("article"),
+      }).rules([
         articleOf.match(),
         articleOf.requireOwner((a) => a.authorId, { flag: "ownerOnly" }),
       ]),
     },
-    providers: [() => [{
-      key: "articles.update",
-      target: ["article:*"],
-      flags: { ownerOnly: true },
-    }]],
+    providers: [
+      () => [
+        {
+          key: "articles.update",
+          target: ["article:*"],
+          flags: { ownerOnly: true },
+        },
+      ],
+    ],
   });
 
   // Capability query avec un grant qui exige owner → DENY (cannot verify)
-  const r = await sys.context({ subject: { id: "user:1" } }).can(
-    "articles.update",
-    ["article:*"],
-  );
+  const r = await sys
+    .context({ subject: { id: "user:1" } })
+    .can("articles.update", ["article:*"]);
   assertEquals(r.ok, false);
 });
 
-Deno.test("non-capability query : fetch et match marchent normalement", async () => {
+test("non-capability query : fetch et match marchent normalement", async () => {
   let fetches = 0;
   const roleOf = resource({
     id: "role",
@@ -147,18 +156,21 @@ Deno.test("non-capability query : fetch et match marchent normalement", async ()
         roleOf.match(),
       ]),
     },
-    providers: [() => [{
-      key: "roles.read",
-      target: ["role:*"],
-      with: { role: { level: "admin" } },
-    }]],
+    providers: [
+      () => [
+        {
+          key: "roles.read",
+          target: ["role:*"],
+          with: { role: { level: "admin" } },
+        },
+      ],
+    ],
   });
 
   // Target concret (pas wildcard) → fetch + check normal
-  const r = await sys.context({ subject: { id: "user:1" } }).can(
-    "roles.read",
-    ["role:r1"],
-  );
+  const r = await sys
+    .context({ subject: { id: "user:1" } })
+    .can("roles.read", ["role:r1"]);
   assertEquals(r.ok, true);
   assertEquals(fetches, 1);
 });

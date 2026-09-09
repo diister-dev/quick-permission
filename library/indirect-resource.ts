@@ -74,7 +74,10 @@ export interface IndirectResource {
    * Si absent, l'indirect reste sentinelle (legacy) : ne contribue qu'au
    * pipeline en cap-mode.
    */
-  readonly fetcher?: (sourceDoc: unknown, ctx: FetchCtx) => readonly unknown[] | Promise<readonly unknown[]>;
+  readonly fetcher?: (
+    sourceDoc: unknown,
+    ctx: FetchCtx,
+  ) => readonly unknown[] | Promise<readonly unknown[]>;
   /** Calcule la cache key pour un target (cf. `Resource.cacheKeyForTarget`). */
   cacheKeyForTarget(target: readonly unknown[]): string;
   /**
@@ -101,7 +104,10 @@ interface IndirectResourceSpec {
   readonly on: IndirectResourceJoin;
   readonly to?: { readonly _type?: string };
   readonly cardinality: "one" | "many";
-  readonly fetch?: (sourceDoc: unknown, ctx: FetchCtx) => readonly unknown[] | Promise<readonly unknown[]>;
+  readonly fetch?: (
+    sourceDoc: unknown,
+    ctx: FetchCtx,
+  ) => readonly unknown[] | Promise<readonly unknown[]>;
 }
 
 /**
@@ -121,7 +127,10 @@ export function indirectResource(spec: IndirectResourceSpec): IndirectResource {
   // the orchestrator reads `from.kind` to know whether to descend.
   const fromNormalized = {
     id: spec.from.id,
-    kind: spec.from.kind === "indirect" ? ("indirect" as const) : ("direct" as const),
+    kind:
+      spec.from.kind === "indirect"
+        ? ("indirect" as const)
+        : ("direct" as const),
   };
   const impl: IndirectResource = {
     id: spec.id,
@@ -162,12 +171,21 @@ export function indirectResource(spec: IndirectResourceSpec): IndirectResource {
           if (spec === undefined) return { ok: true };
           if (typeof spec === "object" && spec !== null) validateSpec(spec);
 
-          const joined = (ctx as FetchCtx & { _indirectFetched?: Map<string, readonly unknown[]> })
-            ._indirectFetched?.get(impl.id) ?? [];
-          const passes = joined.some((d) => evaluateSpec(spec as Record<string, unknown>, d));
+          const joined =
+            (
+              ctx as FetchCtx & {
+                _indirectFetched?: Map<string, readonly unknown[]>;
+              }
+            )._indirectFetched?.get(impl.id) ?? [];
+          const passes = joined.some((d) =>
+            evaluateSpec(spec as Record<string, unknown>, d),
+          );
           return passes
             ? { ok: true }
-            : { ok: false, reason: `indirect[${impl.id}] no joined doc matches spec` };
+            : {
+                ok: false,
+                reason: `indirect[${impl.id}] no joined doc matches spec`,
+              };
         },
       });
     },

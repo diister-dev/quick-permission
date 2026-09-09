@@ -1,12 +1,8 @@
-import { assertEquals } from "jsr:@std/assert";
-import {
-  createSystem,
-  permission,
-  resource,
-  target,
-} from "../mod.ts";
+import { test } from "node:test";
+import { assertEquals } from "./+assert.ts";
+import { createSystem, permission, resource, target } from "../mod.ts";
 
-Deno.test("dedup intra-grant : 2 rules sur la même resource = 1 fetch", async () => {
+test("dedup intra-grant : 2 rules sur la même resource = 1 fetch", async () => {
   let fetches = 0;
   const userOf = resource({
     id: "user",
@@ -27,11 +23,13 @@ Deno.test("dedup intra-grant : 2 rules sur la même resource = 1 fetch", async (
     providers: [() => [{ key: "users.update", target: ["user:*"] }]],
   });
 
-  await sys.context({ subject: { id: "user:1" } }).can("users.update", ["user:abc"]);
+  await sys
+    .context({ subject: { id: "user:1" } })
+    .can("users.update", ["user:abc"]);
   assertEquals(fetches, 1);
 });
 
-Deno.test("dedup inter-grant : 5 grants sur le même target = 1 fetch", async () => {
+test("dedup inter-grant : 5 grants sur le même target = 1 fetch", async () => {
   let fetches = 0;
   const userOf = resource({
     id: "user",
@@ -49,13 +47,15 @@ Deno.test("dedup inter-grant : 5 grants sur le même target = 1 fetch", async ()
         userOf.filter(),
       ]),
     },
-    providers: [() => [
-      { id: "g1", key: "users.update", target: ["user:*"] },
-      { id: "g2", key: "users.update", target: ["user:*"] },
-      { id: "g3", key: "users.update", target: ["user:*"] },
-      { id: "g4", key: "users.update", target: ["user:*"] },
-      { id: "g5", key: "users.update", target: ["user:*"] },
-    ]],
+    providers: [
+      () => [
+        { id: "g1", key: "users.update", target: ["user:*"] },
+        { id: "g2", key: "users.update", target: ["user:*"] },
+        { id: "g3", key: "users.update", target: ["user:*"] },
+        { id: "g4", key: "users.update", target: ["user:*"] },
+        { id: "g5", key: "users.update", target: ["user:*"] },
+      ],
+    ],
   });
 
   const ctx = sys.context({ subject: { id: "user:1" } });
@@ -64,7 +64,7 @@ Deno.test("dedup inter-grant : 5 grants sur le même target = 1 fetch", async ()
   assertEquals(ctx.getFetchCounters(), { user: 1 });
 });
 
-Deno.test("dedup cross-permission : read puis update sur même target = 1 fetch", async () => {
+test("dedup cross-permission : read puis update sur même target = 1 fetch", async () => {
   let fetches = 0;
   const userOf = resource({
     id: "user",
@@ -95,7 +95,7 @@ Deno.test("dedup cross-permission : read puis update sur même target = 1 fetch"
   assertEquals(fetches, 1);
 });
 
-Deno.test("dedup partiel sur target path : expo=1, program=1, registration=2", async () => {
+test("dedup partiel sur target path : expo=1, program=1, registration=2", async () => {
   let expoFetches = 0;
   let programFetches = 0;
   let regFetches = 0;
@@ -136,10 +136,14 @@ Deno.test("dedup partiel sur target path : expo=1, program=1, registration=2", a
         regOf.filter(),
       ]),
     },
-    providers: [() => [{
-      key: "registrations.read",
-      target: ["exposition:*", "program:*", "registration:*"],
-    }]],
+    providers: [
+      () => [
+        {
+          key: "registrations.read",
+          target: ["exposition:*", "program:*", "registration:*"],
+        },
+      ],
+    ],
   });
 
   const ctx = sys.context({ subject: { id: "user:1" } });
@@ -159,7 +163,7 @@ Deno.test("dedup partiel sur target path : expo=1, program=1, registration=2", a
   assertEquals(regFetches, 2);
 });
 
-Deno.test("activeWhen sur resource : skip fetch si aucun grant n'active la rule", async () => {
+test("activeWhen sur resource : skip fetch si aucun grant n'active la rule", async () => {
   let fetches = 0;
   const userOf = resource({
     id: "user",
@@ -180,23 +184,26 @@ Deno.test("activeWhen sur resource : skip fetch si aucun grant n'active la rule"
     schema: {
       "users.update": permission({ target: target.required("user") }).rules([
         userOf.match(),
-        userMembershipsOf.includes(
-          "requiredEntreprise",
-          (m) => m.map((x) => x.tenantId),
+        userMembershipsOf.includes("requiredEntreprise", (m) =>
+          m.map((x) => x.tenantId),
         ),
       ]),
     },
-    providers: [() => [
-      // Grant sans flag → userMembershipsOf NE doit PAS être fetché
-      { id: "g-admin", key: "users.update", target: ["user:*"] },
-    ]],
+    providers: [
+      () => [
+        // Grant sans flag → userMembershipsOf NE doit PAS être fetché
+        { id: "g-admin", key: "users.update", target: ["user:*"] },
+      ],
+    ],
   });
 
-  await sys.context({ subject: { id: "user:1" } }).can("users.update", ["user:abc"]);
+  await sys
+    .context({ subject: { id: "user:1" } })
+    .can("users.update", ["user:abc"]);
   assertEquals(fetches, 0);
 });
 
-Deno.test("compteurs de fetches reset via clearCounters", async () => {
+test("compteurs de fetches reset via clearCounters", async () => {
   const userOf = resource({
     id: "user",
     fetch: () => ({ _id: "user:abc" }),

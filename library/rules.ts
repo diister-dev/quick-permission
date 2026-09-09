@@ -16,10 +16,7 @@ import type {
 } from "./types.ts";
 import { evaluateSpec, validateSpec } from "./mongo-query.ts";
 
-export type DefineRuleOpts<
-  RS extends readonly Resource<unknown>[],
-  P,
-> = {
+export type DefineRuleOpts<RS extends readonly Resource<unknown>[], P> = {
   /** Identifiant de famille de rule (matrix UI). */
   readonly kind: string;
   /**
@@ -70,9 +67,10 @@ export function defineRule<
 
   const needs = (opts.needs ?? []) as readonly Resource<unknown>[];
   const flag = opts.flag;
-  const activeWhen = flag !== undefined
-    ? (grant: Grant) => grant.flags?.[flag] === true
-    : opts.activeWhen;
+  const activeWhen =
+    flag !== undefined
+      ? (grant: Grant) => grant.flags?.[flag] === true
+      : opts.activeWhen;
 
   const descriptor: Record<string, unknown> = { kind: opts.kind };
   if (needs.length === 1) descriptor.source = needs[0].id;
@@ -82,9 +80,7 @@ export function defineRule<
     const extra = opts.describe();
     for (const [k, v] of Object.entries(extra)) {
       // Les champs auto ne peuvent pas être écrasés.
-      if (
-        k === "kind" || k === "source" || k === "sources" || k === "flag"
-      ) {
+      if (k === "kind" || k === "source" || k === "sources" || k === "flag") {
         continue;
       }
       descriptor[k] = v;
@@ -135,10 +131,9 @@ export function defineRule<
  *   matchPath({ field: "userId" })       // {userId: target[0]}
  *   matchPath({ segment: 1 })            // {_id: target[1]}  (e.g., target.path)
  */
-export function matchPath(opts: {
-  readonly field?: string;
-  readonly segment?: number;
-} = {}): Rule {
+export function matchPath(
+  opts: { readonly field?: string; readonly segment?: number } = {},
+): Rule {
   const field = opts.field ?? "_id";
   const segment = opts.segment ?? 0;
   return defineRule({
@@ -215,9 +210,9 @@ export function requireSelf(opts: {
       ctx.target[segment] === ctx.subject.id
         ? { ok: true }
         : {
-          ok: false,
-          reason: `target[${segment}] is not self (flag: ${opts.flag})`,
-        },
+            ok: false,
+            reason: `target[${segment}] is not self (flag: ${opts.flag})`,
+          },
   });
 }
 
@@ -241,6 +236,6 @@ export function deepEqual(a: unknown, b: unknown): boolean {
     deepEqual(
       (a as Record<string, unknown>)[k],
       (b as Record<string, unknown>)[k],
-    )
+    ),
   );
 }

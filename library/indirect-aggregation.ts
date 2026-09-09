@@ -80,9 +80,7 @@ export function buildAggregationStages(
   }
 
   // Topological order: parent before child.
-  const ordered = topoSort(
-    [...required].map((id) => indirectById.get(id)!),
-  );
+  const ordered = topoSort([...required].map((id) => indirectById.get(id)!));
 
   const stages: AggregationStage[] = [{ $match: baseFilter }];
   for (const ir of ordered) {
@@ -118,9 +116,8 @@ export function buildAggregationStages(
 
   if (matchClauses.length > 0) {
     stages.push({
-      $match: matchClauses.length === 1
-        ? matchClauses[0]
-        : { $and: matchClauses },
+      $match:
+        matchClauses.length === 1 ? matchClauses[0] : { $and: matchClauses },
     });
   }
 

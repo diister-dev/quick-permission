@@ -19,7 +19,7 @@ export interface FilterSpec {
  */
 export function mergeFilters(
   current: FilterSpec | undefined,
-  incoming: FilterSpec | undefined
+  incoming: FilterSpec | undefined,
 ): FilterSpec {
   if (!current) return incoming || {};
   if (!incoming) return current;
@@ -27,12 +27,15 @@ export function mergeFilters(
   const result: FilterSpec = { ...current };
 
   for (const [key, value] of Object.entries(incoming)) {
-    if (typeof value === 'boolean' && typeof result[key] === 'boolean') {
+    if (typeof value === "boolean" && typeof result[key] === "boolean") {
       // Union: if either says true, it's true
       result[key] = result[key] || value;
-    } else if (typeof value === 'object' && typeof result[key] === 'object') {
+    } else if (typeof value === "object" && typeof result[key] === "object") {
       // Recursive merge for nested filters
-      result[key] = mergeFilters(result[key] as FilterSpec, value as FilterSpec);
+      result[key] = mergeFilters(
+        result[key] as FilterSpec,
+        value as FilterSpec,
+      );
     } else if (!(key in result)) {
       // New key, add it
       result[key] = value;
@@ -90,14 +93,18 @@ function mergeValue(key: string, current: any, incoming: any): any {
 
   // Plain objects: recurse field-by-field
   if (
-    typeof current === "object" && typeof incoming === "object" &&
-    current !== null && incoming !== null &&
-    !Array.isArray(current) && !Array.isArray(incoming) &&
-    !(current instanceof Date) && !(incoming instanceof Date)
+    typeof current === "object" &&
+    typeof incoming === "object" &&
+    current !== null &&
+    incoming !== null &&
+    !Array.isArray(current) &&
+    !Array.isArray(incoming) &&
+    !(current instanceof Date) &&
+    !(incoming instanceof Date)
   ) {
     const result: Record<string, any> = { ...current };
     for (const [k, v] of Object.entries(incoming)) {
-      result[k] = (k in current) ? mergeValue(k, current[k], v) : v;
+      result[k] = k in current ? mergeValue(k, current[k], v) : v;
     }
     return result;
   }

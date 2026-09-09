@@ -12,7 +12,8 @@
  *   - Sécurité : `to._type` injecté même si le grant l'oublie
  */
 
-import { assertEquals } from "jsr:@std/assert";
+import { test } from "node:test";
+import { assertEquals } from "./+assert.ts";
 import {
   createSystem,
   indirectResource,
@@ -34,7 +35,7 @@ const participantOf = resource({
 
 // ─── Cas A — self-lookup org_membership ───────────────────────────────
 
-Deno.test("indirect: cas A — self-lookup, single grant", async () => {
+test("indirect: cas A — self-lookup, single grant", async () => {
   const membershipsOf = indirectResource({
     id: "memberships_of_participant",
     from: participantOf,
@@ -47,29 +48,28 @@ Deno.test("indirect: cas A — self-lookup, single grant", async () => {
     schema: {
       "expositions.participants.list": permission({
         target: target.path("exposition", "participant"),
-      }).rules([
-        membershipsOf.match(),
-      ]),
+      }).rules([membershipsOf.match()]),
     },
-    providers: [() => [
-      {
-        id: "g-acme",
-        key: "expositions.participants.list",
-        target: ["exposition:X", "participant:*"],
-        with: {
-          memberships_of_participant: {
-            organizationId: "expo_organization:acme",
-            status: "active",
+    providers: [
+      () => [
+        {
+          id: "g-acme",
+          key: "expositions.participants.list",
+          target: ["exposition:X", "participant:*"],
+          with: {
+            memberships_of_participant: {
+              organizationId: "expo_organization:acme",
+              status: "active",
+            },
           },
         },
-      },
-    ]],
+      ],
+    ],
   });
 
-  const r = await sys.context({ subject: { id: "user:lucas" } }).can(
-    "expositions.participants.list",
-    ["exposition:X", "participant:*"],
-  );
+  const r = await sys
+    .context({ subject: { id: "user:lucas" } })
+    .can("expositions.participants.list", ["exposition:X", "participant:*"]);
 
   assertEquals(r.ok, true);
   if (!r.ok) return;
@@ -98,7 +98,7 @@ Deno.test("indirect: cas A — self-lookup, single grant", async () => {
   ]);
 });
 
-Deno.test("indirect: cas A — self-lookup, deux grants → $or cross-grant", async () => {
+test("indirect: cas A — self-lookup, deux grants → $or cross-grant", async () => {
   const membershipsOf = indirectResource({
     id: "memberships_of_participant",
     from: participantOf,
@@ -111,38 +111,37 @@ Deno.test("indirect: cas A — self-lookup, deux grants → $or cross-grant", as
     schema: {
       "expositions.participants.list": permission({
         target: target.path("exposition", "participant"),
-      }).rules([
-        membershipsOf.match(),
-      ]),
+      }).rules([membershipsOf.match()]),
     },
-    providers: [() => [
-      {
-        id: "g-acme",
-        key: "expositions.participants.list",
-        target: ["exposition:X", "participant:*"],
-        with: {
-          memberships_of_participant: {
-            organizationId: "expo_organization:acme",
+    providers: [
+      () => [
+        {
+          id: "g-acme",
+          key: "expositions.participants.list",
+          target: ["exposition:X", "participant:*"],
+          with: {
+            memberships_of_participant: {
+              organizationId: "expo_organization:acme",
+            },
           },
         },
-      },
-      {
-        id: "g-globex",
-        key: "expositions.participants.list",
-        target: ["exposition:X", "participant:*"],
-        with: {
-          memberships_of_participant: {
-            organizationId: "expo_organization:globex",
+        {
+          id: "g-globex",
+          key: "expositions.participants.list",
+          target: ["exposition:X", "participant:*"],
+          with: {
+            memberships_of_participant: {
+              organizationId: "expo_organization:globex",
+            },
           },
         },
-      },
-    ]],
+      ],
+    ],
   });
 
-  const r = await sys.context({ subject: { id: "user:lucas" } }).can(
-    "expositions.participants.list",
-    ["exposition:X", "participant:*"],
-  );
+  const r = await sys
+    .context({ subject: { id: "user:lucas" } })
+    .can("expositions.participants.list", ["exposition:X", "participant:*"]);
 
   assertEquals(r.ok, true);
   if (!r.ok) return;
@@ -173,7 +172,7 @@ Deno.test("indirect: cas A — self-lookup, deux grants → $or cross-grant", as
 
 // ─── Cas D — cross-collection ─────────────────────────────────────────
 
-Deno.test("indirect: cas D — cross-collection lookup (foreignCollection)", async () => {
+test("indirect: cas D — cross-collection lookup (foreignCollection)", async () => {
   const userOfParticipant = indirectResource({
     id: "user_of_participant",
     from: participantOf,
@@ -189,24 +188,23 @@ Deno.test("indirect: cas D — cross-collection lookup (foreignCollection)", asy
     schema: {
       "expositions.participants.list": permission({
         target: target.path("exposition", "participant"),
-      }).rules([
-        userOfParticipant.match(),
-      ]),
+      }).rules([userOfParticipant.match()]),
     },
-    providers: [() => [
-      {
-        id: "g",
-        key: "expositions.participants.list",
-        target: ["exposition:X", "participant:*"],
-        with: { user_of_participant: { entreprise: "entreprise:acme" } },
-      },
-    ]],
+    providers: [
+      () => [
+        {
+          id: "g",
+          key: "expositions.participants.list",
+          target: ["exposition:X", "participant:*"],
+          with: { user_of_participant: { entreprise: "entreprise:acme" } },
+        },
+      ],
+    ],
   });
 
-  const r = await sys.context({ subject: { id: "user:lucas" } }).can(
-    "expositions.participants.list",
-    ["exposition:X", "participant:*"],
-  );
+  const r = await sys
+    .context({ subject: { id: "user:lucas" } })
+    .can("expositions.participants.list", ["exposition:X", "participant:*"]);
 
   assertEquals(r.ok, true);
   if (!r.ok) return;
@@ -232,7 +230,7 @@ Deno.test("indirect: cas D — cross-collection lookup (foreignCollection)", asy
 
 // ─── Cas B — chaîne 2 niveaux ─────────────────────────────────────────
 
-Deno.test("indirect: cas B — chaîne 2 niveaux, intermédiaire auto-inclus", async () => {
+test("indirect: cas B — chaîne 2 niveaux, intermédiaire auto-inclus", async () => {
   const userOfParticipant = indirectResource({
     id: "user_of_participant",
     from: participantOf,
@@ -267,25 +265,26 @@ Deno.test("indirect: cas B — chaîne 2 niveaux, intermédiaire auto-inclus", a
         entrepriseMembersOfUser.match(),
       ]),
     },
-    providers: [() => [
-      {
-        id: "g",
-        key: "expositions.participants.list",
-        target: ["exposition:X", "participant:*"],
-        with: {
-          entreprise_members_of_user: {
-            tenantId: "entreprise:acme",
-            status: "active",
+    providers: [
+      () => [
+        {
+          id: "g",
+          key: "expositions.participants.list",
+          target: ["exposition:X", "participant:*"],
+          with: {
+            entreprise_members_of_user: {
+              tenantId: "entreprise:acme",
+              status: "active",
+            },
           },
         },
-      },
-    ]],
+      ],
+    ],
   });
 
-  const r = await sys.context({ subject: { id: "user:lucas" } }).can(
-    "expositions.participants.list",
-    ["exposition:X", "participant:*"],
-  );
+  const r = await sys
+    .context({ subject: { id: "user:lucas" } })
+    .can("expositions.participants.list", ["exposition:X", "participant:*"]);
 
   assertEquals(r.ok, true);
   if (!r.ok) return;
@@ -328,7 +327,7 @@ Deno.test("indirect: cas B — chaîne 2 niveaux, intermédiaire auto-inclus", a
 
 // ─── Backward compat ──────────────────────────────────────────────────
 
-Deno.test("indirect: aucune indirect resource utilisée → pas de stages dans CanResult", async () => {
+test("indirect: aucune indirect resource utilisée → pas de stages dans CanResult", async () => {
   const userOf = resource({
     id: "user",
     fetch: ({ target }) => ({ _id: target[0], role: "admin" }),
@@ -341,20 +340,21 @@ Deno.test("indirect: aucune indirect resource utilisée → pas de stages dans C
         userOf.match(),
       ]),
     },
-    providers: [() => [
-      {
-        id: "g",
-        key: "users.read",
-        target: ["user:*"],
-        with: { user: { role: "admin" } },
-      },
-    ]],
+    providers: [
+      () => [
+        {
+          id: "g",
+          key: "users.read",
+          target: ["user:*"],
+          with: { user: { role: "admin" } },
+        },
+      ],
+    ],
   });
 
-  const r = await sys.context({ subject: { id: "s" } }).can(
-    "users.read",
-    ["user:lucas"],
-  );
+  const r = await sys
+    .context({ subject: { id: "s" } })
+    .can("users.read", ["user:lucas"]);
 
   assertEquals(r.ok, true);
   if (!r.ok) return;
@@ -363,7 +363,7 @@ Deno.test("indirect: aucune indirect resource utilisée → pas de stages dans C
   assertEquals("stages" in r, false);
 });
 
-Deno.test("indirect: déclarée mais pas référencée par les grants → pas de stages", async () => {
+test("indirect: déclarée mais pas référencée par les grants → pas de stages", async () => {
   // L'indirect resource est passée à match() dans la perm, mais aucun
   // grant n'a de `with[id]` la concernant → pas besoin de générer un
   // pipeline pour rien.
@@ -379,24 +379,23 @@ Deno.test("indirect: déclarée mais pas référencée par les grants → pas de
     schema: {
       "expositions.participants.list": permission({
         target: target.path("exposition", "participant"),
-      }).rules([
-        membershipsOf.match(),
-      ]),
+      }).rules([membershipsOf.match()]),
     },
-    providers: [() => [
-      {
-        id: "g-open",
-        key: "expositions.participants.list",
-        target: ["exposition:X", "participant:*"],
-        // Pas de `with` → personne ne réfère à l'indirect resource.
-      },
-    ]],
+    providers: [
+      () => [
+        {
+          id: "g-open",
+          key: "expositions.participants.list",
+          target: ["exposition:X", "participant:*"],
+          // Pas de `with` → personne ne réfère à l'indirect resource.
+        },
+      ],
+    ],
   });
 
-  const r = await sys.context({ subject: { id: "user:lucas" } }).can(
-    "expositions.participants.list",
-    ["exposition:X", "participant:*"],
-  );
+  const r = await sys
+    .context({ subject: { id: "user:lucas" } })
+    .can("expositions.participants.list", ["exposition:X", "participant:*"]);
 
   assertEquals(r.ok, true);
   if (!r.ok) return;
@@ -405,7 +404,7 @@ Deno.test("indirect: déclarée mais pas référencée par les grants → pas de
 
 // ─── Sécurité ─────────────────────────────────────────────────────────
 
-Deno.test("indirect: any-wins — grant open + grant indirect → mode find (pas de stages)", async () => {
+test("indirect: any-wins — grant open + grant indirect → mode find (pas de stages)", async () => {
   // Sémantique critique : un admin global (grant sans condition indirect)
   // doit voir TOUT, même si un autre grant impose un scope via indirect.
   // Symétrique à `aggregateConstraints` qui traite `undefined` comme
@@ -424,30 +423,33 @@ Deno.test("indirect: any-wins — grant open + grant indirect → mode find (pas
         target: target.path("exposition", "participant"),
       }).rules([membershipsOf.match()]),
     },
-    providers: [() => [
-      // Grant 1 : scope via indirect (membre d'Acme)
-      {
-        id: "g-member",
-        key: "expositions.participants.list",
-        target: ["exposition:X", "participant:*"],
-        with: {
-          memberships_of_participant: { organizationId: "expo_organization:acme" },
+    providers: [
+      () => [
+        // Grant 1 : scope via indirect (membre d'Acme)
+        {
+          id: "g-member",
+          key: "expositions.participants.list",
+          target: ["exposition:X", "participant:*"],
+          with: {
+            memberships_of_participant: {
+              organizationId: "expo_organization:acme",
+            },
+          },
         },
-      },
-      // Grant 2 : open (admin global ORGANIZER, voit tout)
-      {
-        id: "g-admin",
-        key: "expositions.participants.list",
-        target: ["exposition:X", "participant:*"],
-        // Pas de `with` → pas de condition indirect.
-      },
-    ]],
+        // Grant 2 : open (admin global ORGANIZER, voit tout)
+        {
+          id: "g-admin",
+          key: "expositions.participants.list",
+          target: ["exposition:X", "participant:*"],
+          // Pas de `with` → pas de condition indirect.
+        },
+      ],
+    ],
   });
 
-  const r = await sys.context({ subject: { id: "user:lucas" } }).can(
-    "expositions.participants.list",
-    ["exposition:X", "participant:*"],
-  );
+  const r = await sys
+    .context({ subject: { id: "user:lucas" } })
+    .can("expositions.participants.list", ["exposition:X", "participant:*"]);
 
   assertEquals(r.ok, true);
   if (!r.ok) return;
@@ -455,7 +457,7 @@ Deno.test("indirect: any-wins — grant open + grant indirect → mode find (pas
   assertEquals("stages" in r, false);
 });
 
-Deno.test("indirect: `to._type` est forcé dans le $elemMatch même si le grant l'omet", async () => {
+test("indirect: `to._type` est forcé dans le $elemMatch même si le grant l'omet", async () => {
   // Un grant pourrait essayer de matcher un autre `_type` que celui
   // déclaré dans la resource indirecte — la lib doit l'injecter.
   const membershipsOf = indirectResource({
@@ -472,28 +474,35 @@ Deno.test("indirect: `to._type` est forcé dans le $elemMatch même si le grant 
         target: target.path("exposition", "participant"),
       }).rules([membershipsOf.match()]),
     },
-    providers: [() => [
-      {
-        id: "g",
-        key: "expositions.participants.list",
-        target: ["exposition:X", "participant:*"],
-        with: {
-          memberships_of_participant: { organizationId: "expo_organization:acme" },
+    providers: [
+      () => [
+        {
+          id: "g",
+          key: "expositions.participants.list",
+          target: ["exposition:X", "participant:*"],
+          with: {
+            memberships_of_participant: {
+              organizationId: "expo_organization:acme",
+            },
+          },
         },
-      },
-    ]],
+      ],
+    ],
   });
 
-  const r = await sys.context({ subject: { id: "user:lucas" } }).can(
-    "expositions.participants.list",
-    ["exposition:X", "participant:*"],
-  );
+  const r = await sys
+    .context({ subject: { id: "user:lucas" } })
+    .can("expositions.participants.list", ["exposition:X", "participant:*"]);
 
   assertEquals(r.ok, true);
   if (!r.ok) return;
   // Le $elemMatch final contient bien _type, injecté par la lib.
   const lastMatch = r.stages?.[r.stages.length - 1] as
-    | { $match: { _memberships_of_participant: { $elemMatch: Record<string, unknown> } } }
+    | {
+        $match: {
+          _memberships_of_participant: { $elemMatch: Record<string, unknown> };
+        };
+      }
     | undefined;
   assertEquals(
     lastMatch?.$match?._memberships_of_participant?.$elemMatch?._type,

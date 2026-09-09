@@ -28,22 +28,30 @@
  * they read `ctx.target` / `ctx.subject` only.
  */
 
-import type {
-  FetchCtx,
-  Grant,
-  Resource,
-  Rule,
-} from "./types.ts";
+import type { FetchCtx, Grant, Resource, Rule } from "./types.ts";
 import { deepEqual, defineRule } from "./rules.ts";
 import { evaluateSpec, validateSpec } from "./mongo-query.ts";
 
 class ResourceImpl<T> implements Resource<T> {
+  // Spelled out rather than declared as constructor parameter properties:
+  // those are the one TypeScript-only construct Node's type stripping cannot
+  // erase, so they made this file unloadable as raw `.ts` there.
+  public readonly id: string;
+  public readonly fetcher: (ctx: FetchCtx) => T | Promise<T>;
+  public readonly activator?: (grant: Grant) => boolean;
+  public readonly dedupKey?: (ctx: FetchCtx) => string;
+
   constructor(
-    public readonly id: string,
-    public readonly fetcher: (ctx: FetchCtx) => T | Promise<T>,
-    public readonly activator?: (grant: Grant) => boolean,
-    public readonly dedupKey?: (ctx: FetchCtx) => string,
-  ) {}
+    id: string,
+    fetcher: (ctx: FetchCtx) => T | Promise<T>,
+    activator?: (grant: Grant) => boolean,
+    dedupKey?: (ctx: FetchCtx) => string,
+  ) {
+    this.id = id;
+    this.fetcher = fetcher;
+    this.activator = activator;
+    this.dedupKey = dedupKey;
+  }
 
   isActiveFor(grant: Grant): boolean {
     return this.activator ? this.activator(grant) : true;
@@ -54,9 +62,9 @@ class ResourceImpl<T> implements Resource<T> {
     // Default safe : hash de tous les inputs (subject + target + grant.with).
     // Jamais de fausse dedup, mais peut être sous-optimal — d'où l'incitation
     // à fournir un dedupKey explicite quand on connaît les params pertinents.
-    return `${this.id}::${ctx.subject.id}::${
-      JSON.stringify(ctx.target)
-    }::${JSON.stringify(ctx.grant.with ?? {})}`;
+    return `${this.id}::${ctx.subject.id}::${JSON.stringify(
+      ctx.target,
+    )}::${JSON.stringify(ctx.grant.with ?? {})}`;
   }
 
   cacheKeyForTarget(target: readonly unknown[]): string {
@@ -73,9 +81,9 @@ class ResourceImpl<T> implements Resource<T> {
       capability: false,
     };
     if (this.dedupKey) return `${this.id}::${this.dedupKey(syntheticCtx)}`;
-    return `${this.id}::${syntheticCtx.subject.id}::${
-      JSON.stringify(target)
-    }::${JSON.stringify({})}`;
+    return `${this.id}::${syntheticCtx.subject.id}::${JSON.stringify(
+      target,
+    )}::${JSON.stringify({})}`;
   }
 
   // ─── Méthodes de sucre — toutes produites via defineRule ─────────────
@@ -105,7 +113,11 @@ class ResourceImpl<T> implements Resource<T> {
         // the check is fully resolved and the (potentially inappropriate)
         // constraint would pollute the listed collection's `find()`.
         if (ctx.capability && data === undefined) {
-          if (typeof spec === "object" && spec !== null && !Array.isArray(spec)) {
+          if (
+            typeof spec === "object" &&
+            spec !== null &&
+            !Array.isArray(spec)
+          ) {
             return { ok: true, constraint: spec as Record<string, unknown> };
           }
           return { ok: true };
@@ -148,7 +160,9 @@ class ResourceImpl<T> implements Resource<T> {
         // No filter on this grant → expose `null` spec so the system can
         // collapse the cross-grant union to "all fields".
         if (
-          !filter || sub === null || typeof sub !== "object" ||
+          !filter ||
+          sub === null ||
+          typeof sub !== "object" ||
           Array.isArray(sub)
         ) {
           return { ok: true, data: sub, filter: { source: sub, spec: null } };
@@ -193,18 +207,18 @@ class ResourceImpl<T> implements Resource<T> {
           return required.some((r) => list.includes(r))
             ? { ok: true }
             : {
-              ok: false,
-              reason: `includes[${grantField}] none of ${
-                JSON.stringify(required)
-              } present`,
-            };
+                ok: false,
+                reason: `includes[${grantField}] none of ${JSON.stringify(
+                  required,
+                )} present`,
+              };
         }
         return list.includes(required)
           ? { ok: true }
           : {
-            ok: false,
-            reason: `includes[${grantField}] ${String(required)} absent`,
-          };
+              ok: false,
+              reason: `includes[${grantField}] ${String(required)} absent`,
+            };
       },
     });
   }
@@ -247,9 +261,9 @@ class ResourceImpl<T> implements Resource<T> {
         return getter(data as T) === ctx.subject.id
           ? { ok: true }
           : {
-            ok: false,
-            reason: `not owner of ${id} (flag: ${opts.flag})`,
-          };
+              ok: false,
+              reason: `not owner of ${id} (flag: ${opts.flag})`,
+            };
       },
     });
   }
@@ -274,9 +288,9 @@ class ResourceImpl<T> implements Resource<T> {
         return list.includes(ctx.subject.id)
           ? { ok: true }
           : {
-            ok: false,
-            reason: `subject not member of ${id} (flag: ${opts.flag})`,
-          };
+              ok: false,
+              reason: `subject not member of ${id} (flag: ${opts.flag})`,
+            };
       },
     });
   }
@@ -304,9 +318,9 @@ class ResourceImpl<T> implements Resource<T> {
         return predicate(data as T, ctx)
           ? { ok: true }
           : {
-            ok: false,
-            reason: `require-custom[${id}] denied (flag: ${opts.flag})`,
-          };
+              ok: false,
+              reason: `require-custom[${id}] denied (flag: ${opts.flag})`,
+            };
       },
     });
   }

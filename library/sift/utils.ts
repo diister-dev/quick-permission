@@ -39,8 +39,10 @@ export const isObject = typeChecker<Object>("Object");
 export const isFunction = typeChecker<Function>("Function");
 
 export const isProperty = (item: object, key: PropertyKey): boolean => {
-  return Object.prototype.hasOwnProperty.call(item, key) &&
-    !isFunction((item as Record<PropertyKey, unknown>)[key as string]);
+  return (
+    Object.prototype.hasOwnProperty.call(item, key) &&
+    !isFunction((item as Record<PropertyKey, unknown>)[key as string])
+  );
 };
 
 export const isVanillaObject = (value: unknown): boolean => {

@@ -1,14 +1,19 @@
 // Vendored from sift.js (https://github.com/crcn/sift.js) — MIT licensed.
 // `$where` operator removed (security: arbitrary code execution).
+//
+// Deviates from upstream in one mechanical way: constructor parameter
+// properties are written out as explicit fields. Node's type stripping cannot
+// erase that syntax, so upstream's form made this file unloadable as raw
+// TypeScript there — and the suite runs on Node to cover a second engine.
 
 import {
   comparable,
-  Comparator,
+  type Comparator,
   equals,
   isArray,
   isProperty,
   isVanillaObject,
-  Key,
+  type Key,
 } from "./utils.ts";
 
 export interface Operation<TItem> {
@@ -73,19 +78,19 @@ export type ArrayValueQuery<TValue> = {
 
 type Unpacked<T> = T extends (infer U)[] ? U : T;
 
-export type ValueQuery<TValue> = TValue extends Array<unknown>
-  ? ArrayValueQuery<Unpacked<TValue>>
-  : BasicValueQuery<TValue>;
+export type ValueQuery<TValue> =
+  TValue extends Array<unknown>
+    ? ArrayValueQuery<Unpacked<TValue>>
+    : BasicValueQuery<TValue>;
 
 type NotObject = string | number | Date | boolean | Array<unknown>;
 export type ShapeQuery<TItemSchema> = TItemSchema extends NotObject
-  // deno-lint-ignore ban-types
-  ? {}
+  ? // deno-lint-ignore ban-types
+    {}
   : { [k in keyof TItemSchema]?: TItemSchema[k] | ValueQuery<TItemSchema[k]> };
 
-export type NestedQuery<TItemSchema> =
-  & ValueQuery<TItemSchema>
-  & ShapeQuery<TItemSchema>;
+export type NestedQuery<TItemSchema> = ValueQuery<TItemSchema> &
+  ShapeQuery<TItemSchema>;
 
 export type Query<TItemSchema> =
   | TItemSchema
@@ -136,7 +141,8 @@ const walkKeyPathValues = (
 };
 
 export abstract class BaseOperation<TParams, TItem = unknown>
-  implements Operation<TItem> {
+  implements Operation<TItem>
+{
   keep = false;
   done = false;
   abstract propop: boolean;
@@ -174,13 +180,16 @@ export abstract class BaseOperation<TParams, TItem = unknown>
 }
 
 abstract class GroupOperation extends BaseOperation<unknown> {
+  public readonly children: Operation<unknown>[];
+
   constructor(
     params: unknown,
     owneryQuery: unknown,
     options: Options,
-    public readonly children: Operation<unknown>[],
+    children: Operation<unknown>[],
   ) {
     super(params, owneryQuery, options);
+    this.children = children;
   }
 
   override reset(): void {
@@ -229,17 +238,22 @@ abstract class GroupOperation extends BaseOperation<unknown> {
   }
 }
 
-export abstract class NamedGroupOperation extends GroupOperation
-  implements NamedOperation {
+export abstract class NamedGroupOperation
+  extends GroupOperation
+  implements NamedOperation
+{
   abstract override propop: boolean;
+  override readonly name: string;
+
   constructor(
     params: unknown,
     owneryQuery: unknown,
     options: Options,
     children: Operation<unknown>[],
-    override readonly name: string,
+    name: string,
   ) {
     super(params, owneryQuery, options, children);
+    this.name = name;
   }
 }
 
@@ -258,14 +272,17 @@ export class QueryOperation<TItem> extends GroupOperation {
 
 export class NestedOperation extends GroupOperation {
   readonly propop = true;
+  readonly keyPath: Key[];
+
   constructor(
-    readonly keyPath: Key[],
+    keyPath: Key[],
     params: unknown,
     owneryQuery: unknown,
     options: Options,
     children: Operation<unknown>[],
   ) {
     super(params, owneryQuery, options, children);
+    this.keyPath = keyPath;
   }
 
   override next(item: unknown, key?: Key, parent?: unknown): void {
@@ -291,10 +308,7 @@ export class NestedOperation extends GroupOperation {
   };
 }
 
-export const createTester = (
-  a: unknown,
-  compare: Comparator,
-): Tester => {
+export const createTester = (a: unknown, compare: Comparator): Tester => {
   if (a instanceof Function) {
     return a as Tester;
   }
@@ -339,7 +353,9 @@ export const createEqualsOperation = (
   new EqualsOperation(params, owneryQuery, options);
 
 export const numericalOperationCreator =
-  (createNumericalOperation: OperationCreator<unknown>): OperationCreator<unknown> =>
+  (
+    createNumericalOperation: OperationCreator<unknown>,
+  ): OperationCreator<unknown> =>
   (params: unknown, owneryQuery: unknown, options: Options, name: string) => {
     return createNumericalOperation(params, owneryQuery, options, name);
   };
@@ -348,12 +364,7 @@ export const numericalOperation = (
   createTester: (value: unknown) => Tester,
 ): OperationCreator<unknown> =>
   numericalOperationCreator(
-    (
-      params: unknown,
-      owneryQuery: unknown,
-      options: Options,
-      name: string,
-    ) => {
+    (params: unknown, owneryQuery: unknown, options: Options, name: string) => {
       const typeofParams = typeof comparable(params);
       const test = createTester(params);
       return new EqualsOperation(
@@ -397,7 +408,10 @@ const throwUnsupportedOperation = (name: string): never => {
   throw new Error(`Unsupported operation: ${name}`);
 };
 
-export const containsOperation = (query: unknown, options: Options): boolean => {
+export const containsOperation = (
+  query: unknown,
+  options: Options,
+): boolean => {
   if (query == null || typeof query !== "object") return false;
   for (const key in query as object) {
     if (
@@ -530,7 +544,7 @@ export const createOperationTester =
 export const createQueryTester = <TItem, TSchema = TItem>(
   query: Query<TSchema>,
   options: Partial<Options> = {},
-): (item: TItem, key?: Key, owner?: unknown) => boolean => {
+): ((item: TItem, key?: Key, owner?: unknown) => boolean) => {
   return createOperationTester(
     createQueryOperation<TItem, TSchema>(query, null, options),
   );

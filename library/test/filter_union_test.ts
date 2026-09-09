@@ -5,7 +5,8 @@
  * the union to "all fields".
  */
 
-import { assertEquals } from "jsr:@std/assert";
+import { test } from "node:test";
+import { assertEquals } from "./+assert.ts";
 import {
   createSystem,
   permission,
@@ -26,7 +27,7 @@ const userOf = resource({
   dedupKey: ({ target }) => target[0] as string,
 });
 
-Deno.test("filter union: any unfiltered grant exposes all fields", async () => {
+test("filter union: any unfiltered grant exposes all fields", async () => {
   const sys = createSystem({
     schema: {
       "users.read": permission({ target: target.required("user") }).rules([
@@ -34,22 +35,23 @@ Deno.test("filter union: any unfiltered grant exposes all fields", async () => {
         userOf.filter(),
       ]),
     },
-    providers: [() => [
-      // Self grant: no filter (full access).
-      { id: "self", key: "users.read", target: ["user:romain"] },
-      // Manage grant: filter restricts to {_id, firstname}.
-      {
-        id: "manage",
-        key: "users.read",
-        target: ["user:*"],
-        filter: { _id: true, firstname: true } as Record<string, boolean>,
-      },
-    ]],
+    providers: [
+      () => [
+        // Self grant: no filter (full access).
+        { id: "self", key: "users.read", target: ["user:romain"] },
+        // Manage grant: filter restricts to {_id, firstname}.
+        {
+          id: "manage",
+          key: "users.read",
+          target: ["user:*"],
+          filter: { _id: true, firstname: true } as Record<string, boolean>,
+        },
+      ],
+    ],
   });
-  const r = await sys.context({ subject: { id: "s" } }).can(
-    "users.read",
-    ["user:romain"],
-  );
+  const r = await sys
+    .context({ subject: { id: "s" } })
+    .can("users.read", ["user:romain"]);
   assertEquals(r.ok, true);
   if (r.ok) {
     assertEquals(r.data, {
@@ -62,7 +64,7 @@ Deno.test("filter union: any unfiltered grant exposes all fields", async () => {
   }
 });
 
-Deno.test("filter union: all grants filtered → union of fields", async () => {
+test("filter union: all grants filtered → union of fields", async () => {
   const sys = createSystem({
     schema: {
       "users.read": permission({ target: target.required("user") }).rules([
@@ -70,25 +72,26 @@ Deno.test("filter union: all grants filtered → union of fields", async () => {
         userOf.filter(),
       ]),
     },
-    providers: [() => [
-      {
-        id: "g1",
-        key: "users.read",
-        target: ["user:*"],
-        filter: { _id: true, firstname: true } as Record<string, boolean>,
-      },
-      {
-        id: "g2",
-        key: "users.read",
-        target: ["user:*"],
-        filter: { lastname: true, email: true } as Record<string, boolean>,
-      },
-    ]],
+    providers: [
+      () => [
+        {
+          id: "g1",
+          key: "users.read",
+          target: ["user:*"],
+          filter: { _id: true, firstname: true } as Record<string, boolean>,
+        },
+        {
+          id: "g2",
+          key: "users.read",
+          target: ["user:*"],
+          filter: { lastname: true, email: true } as Record<string, boolean>,
+        },
+      ],
+    ],
   });
-  const r = await sys.context({ subject: { id: "s" } }).can(
-    "users.read",
-    ["user:romain"],
-  );
+  const r = await sys
+    .context({ subject: { id: "s" } })
+    .can("users.read", ["user:romain"]);
   assertEquals(r.ok, true);
   if (r.ok) {
     assertEquals(r.data, {
@@ -100,7 +103,7 @@ Deno.test("filter union: all grants filtered → union of fields", async () => {
   }
 });
 
-Deno.test("filter union: single filtered grant projects normally", async () => {
+test("filter union: single filtered grant projects normally", async () => {
   const sys = createSystem({
     schema: {
       "users.read": permission({ target: target.required("user") }).rules([
@@ -108,39 +111,45 @@ Deno.test("filter union: single filtered grant projects normally", async () => {
         userOf.filter(),
       ]),
     },
-    providers: [() => [
-      {
-        id: "g",
-        key: "users.read",
-        target: ["user:*"],
-        filter: { firstname: true, lastname: true } as Record<string, boolean>,
-      },
-    ]],
+    providers: [
+      () => [
+        {
+          id: "g",
+          key: "users.read",
+          target: ["user:*"],
+          filter: { firstname: true, lastname: true } as Record<
+            string,
+            boolean
+          >,
+        },
+      ],
+    ],
   });
-  const r = await sys.context({ subject: { id: "s" } }).can(
-    "users.read",
-    ["user:romain"],
-  );
+  const r = await sys
+    .context({ subject: { id: "s" } })
+    .can("users.read", ["user:romain"]);
   assertEquals(r.ok, true);
   if (r.ok) {
     assertEquals(r.data, { firstname: "Romain", lastname: "Doe" });
   }
 });
 
-Deno.test("filter union: order-independent — manage-then-self vs self-then-manage", async () => {
+test("filter union: order-independent — manage-then-self vs self-then-manage", async () => {
   const buildProviders = (
     order: ["self" | "manage", "self" | "manage"],
-  ): Provider[] =>
-    [() => order.map((kind) =>
-      kind === "self"
-        ? { id: "self", key: "users.read", target: ["user:romain"] }
-        : {
-          id: "manage",
-          key: "users.read",
-          target: ["user:*"],
-          filter: { _id: true, firstname: true } as Record<string, boolean>,
-        }
-    )];
+  ): Provider[] => [
+    () =>
+      order.map((kind) =>
+        kind === "self"
+          ? { id: "self", key: "users.read", target: ["user:romain"] }
+          : {
+              id: "manage",
+              key: "users.read",
+              target: ["user:*"],
+              filter: { _id: true, firstname: true } as Record<string, boolean>,
+            },
+      ),
+  ];
 
   const orders: Array<["self" | "manage", "self" | "manage"]> = [
     ["self", "manage"],
@@ -156,10 +165,9 @@ Deno.test("filter union: order-independent — manage-then-self vs self-then-man
       },
       providers: buildProviders(order),
     });
-    const r = await sys.context({ subject: { id: "s" } }).can(
-      "users.read",
-      ["user:romain"],
-    );
+    const r = await sys
+      .context({ subject: { id: "s" } })
+      .can("users.read", ["user:romain"]);
     assertEquals(r.ok, true);
     if (r.ok) {
       // Same result regardless of grant order: all fields visible.

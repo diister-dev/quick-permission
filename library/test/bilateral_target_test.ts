@@ -6,7 +6,8 @@
  * reach `targetMatches` or `expandsTo`. `target.optional` and `target.none`
  * keep their existing "match-all on undefined target" semantics.
  */
-import { assertEquals } from "jsr:@std/assert";
+import { test } from "node:test";
+import { assertEquals } from "./+assert.ts";
 import {
   createSystem,
   intermediate,
@@ -35,7 +36,7 @@ const memberOf = resource({
 
 // ─── target.required: target-less grant must NOT match ──────────────────
 
-Deno.test("target.required: target-less grant does NOT match concrete request", async () => {
+test("target.required: target-less grant does NOT match concrete request", async () => {
   const sys = createSystem({
     schema: {
       "users.read": permission({ target: target.required("user") }).rules([
@@ -46,14 +47,13 @@ Deno.test("target.required: target-less grant does NOT match concrete request", 
     providers: [() => [{ id: "g1", key: "users.read" }]],
   });
 
-  const result = await sys.context({ subject: { id: "user:caller" } }).can(
-    "users.read",
-    ["user:abc"],
-  );
+  const result = await sys
+    .context({ subject: { id: "user:caller" } })
+    .can("users.read", ["user:abc"]);
   assertEquals(result.ok, false);
 });
 
-Deno.test("target.required: target-less grant does NOT match wildcard request", async () => {
+test("target.required: target-less grant does NOT match wildcard request", async () => {
   const sys = createSystem({
     schema: {
       "users.read": permission({ target: target.required("user") }).rules([
@@ -63,14 +63,13 @@ Deno.test("target.required: target-less grant does NOT match wildcard request", 
     providers: [() => [{ id: "g1", key: "users.read" }]],
   });
 
-  const result = await sys.context({ subject: { id: "user:caller" } }).can(
-    "users.read",
-    ["user:*"],
-  );
+  const result = await sys
+    .context({ subject: { id: "user:caller" } })
+    .can("users.read", ["user:*"]);
   assertEquals(result.ok, false);
 });
 
-Deno.test("target.required: properly-targeted grant continues to work", async () => {
+test("target.required: properly-targeted grant continues to work", async () => {
   const sys = createSystem({
     schema: {
       "users.read": permission({ target: target.required("user") }).rules([
@@ -80,14 +79,13 @@ Deno.test("target.required: properly-targeted grant continues to work", async ()
     providers: [() => [{ id: "g1", key: "users.read", target: ["user:abc"] }]],
   });
 
-  const result = await sys.context({ subject: { id: "user:caller" } }).can(
-    "users.read",
-    ["user:abc"],
-  );
+  const result = await sys
+    .context({ subject: { id: "user:caller" } })
+    .can("users.read", ["user:abc"]);
   assertEquals(result.ok, true);
 });
 
-Deno.test("target.required: wildcard-targeted grant matches concrete request", async () => {
+test("target.required: wildcard-targeted grant matches concrete request", async () => {
   const sys = createSystem({
     schema: {
       "users.read": permission({ target: target.required("user") }).rules([
@@ -97,16 +95,15 @@ Deno.test("target.required: wildcard-targeted grant matches concrete request", a
     providers: [() => [{ id: "g1", key: "users.read", target: ["user:*"] }]],
   });
 
-  const result = await sys.context({ subject: { id: "user:caller" } }).can(
-    "users.read",
-    ["user:abc"],
-  );
+  const result = await sys
+    .context({ subject: { id: "user:caller" } })
+    .can("users.read", ["user:abc"]);
   assertEquals(result.ok, true);
 });
 
 // ─── target.path: same enforcement ──────────────────────────────────────
 
-Deno.test("target.path: target-less grant does NOT match", async () => {
+test("target.path: target-less grant does NOT match", async () => {
   const sys = createSystem({
     schema: {
       "expo.members.read": permission({
@@ -116,16 +113,15 @@ Deno.test("target.path: target-less grant does NOT match", async () => {
     providers: [() => [{ id: "g1", key: "expo.members.read" }]],
   });
 
-  const result = await sys.context({ subject: { id: "user:caller" } }).can(
-    "expo.members.read",
-    ["exposition:e1", "member:m1"],
-  );
+  const result = await sys
+    .context({ subject: { id: "user:caller" } })
+    .can("expo.members.read", ["exposition:e1", "member:m1"]);
   assertEquals(result.ok, false);
 });
 
 // ─── target.optional: legacy match-all-on-undefined preserved ──────────
 
-Deno.test("target.optional: target-less grant STILL matches (legacy behavior)", async () => {
+test("target.optional: target-less grant STILL matches (legacy behavior)", async () => {
   const sys = createSystem({
     schema: {
       "users.read": permission({ target: target.optional("user") }).rules([
@@ -135,16 +131,15 @@ Deno.test("target.optional: target-less grant STILL matches (legacy behavior)", 
     providers: [() => [{ id: "g1", key: "users.read" }]],
   });
 
-  const result = await sys.context({ subject: { id: "user:caller" } }).can(
-    "users.read",
-    ["user:abc"],
-  );
+  const result = await sys
+    .context({ subject: { id: "user:caller" } })
+    .can("users.read", ["user:abc"]);
   assertEquals(result.ok, true);
 });
 
 // ─── target.none: target-less grant always matches (unchanged) ─────────
 
-Deno.test("target.none: target-less grant matches", async () => {
+test("target.none: target-less grant matches", async () => {
   const sys = createSystem({
     schema: {
       "users.create": permission({ target: target.none() }).rules([]),
@@ -152,15 +147,15 @@ Deno.test("target.none: target-less grant matches", async () => {
     providers: [() => [{ id: "g1", key: "users.create" }]],
   });
 
-  const result = await sys.context({ subject: { id: "user:caller" } }).can(
-    "users.create",
-  );
+  const result = await sys
+    .context({ subject: { id: "user:caller" } })
+    .can("users.create");
   assertEquals(result.ok, true);
 });
 
 // ─── Expansion stops at malformed parent grants ─────────────────────────
 
-Deno.test("expansion: target-less grant on target.required intermediate is dropped, children NOT produced", async () => {
+test("expansion: target-less grant on target.required intermediate is dropped, children NOT produced", async () => {
   let expandsToCalls = 0;
   const sys = createSystem({
     schema: {
@@ -185,24 +180,22 @@ Deno.test("expansion: target-less grant on target.required intermediate is dropp
   const bootCalls = expandsToCalls;
 
   // Direct check on the malformed key: dropped.
-  const r1 = await sys.context({ subject: { id: "user:caller" } }).can(
-    "users.manage",
-    ["user:abc"],
-  );
+  const r1 = await sys
+    .context({ subject: { id: "user:caller" } })
+    .can("users.manage", ["user:abc"]);
   assertEquals(r1.ok, false);
 
   // Check on the child key: would only succeed if expansion ran.
-  const r2 = await sys.context({ subject: { id: "user:caller" } }).can(
-    "users.read",
-    ["user:abc"],
-  );
+  const r2 = await sys
+    .context({ subject: { id: "user:caller" } })
+    .can("users.read", ["user:abc"]);
   assertEquals(r2.ok, false);
 
   // Runtime expandsTo invocations on the malformed grant: zero.
   assertEquals(expandsToCalls, bootCalls);
 });
 
-Deno.test("expansion: properly-targeted parent expands and children inherit target", async () => {
+test("expansion: properly-targeted parent expands and children inherit target", async () => {
   let expandsToCalls = 0;
   const sys = createSystem({
     schema: {
@@ -218,37 +211,35 @@ Deno.test("expansion: properly-targeted parent expands and children inherit targ
         },
       }).rules([userOf.match()]),
     },
-    providers: [() => [
-      { id: "g1", key: "users.manage", target: ["user:*"] },
-    ]],
+    providers: [() => [{ id: "g1", key: "users.manage", target: ["user:*"] }]],
   });
 
-  const result = await sys.context({ subject: { id: "user:caller" } }).can(
-    "users.read",
-    ["user:abc"],
-  );
+  const result = await sys
+    .context({ subject: { id: "user:caller" } })
+    .can("users.read", ["user:abc"]);
   assertEquals(result.ok, true);
   assertEquals(expandsToCalls >= 1, true);
 });
 
 // ─── Mixed grants: malformed dropped, valid kept ───────────────────────
 
-Deno.test("expansion: malformed grant dropped while sibling valid grants survive", async () => {
+test("expansion: malformed grant dropped while sibling valid grants survive", async () => {
   const sys = createSystem({
     schema: {
       "users.read": permission({ target: target.required("user") }).rules([
         userOf.match(),
       ]),
     },
-    providers: [() => [
-      { id: "bad", key: "users.read" },                       // dropped
-      { id: "good", key: "users.read", target: ["user:abc"] }, // kept
-    ]],
+    providers: [
+      () => [
+        { id: "bad", key: "users.read" }, // dropped
+        { id: "good", key: "users.read", target: ["user:abc"] }, // kept
+      ],
+    ],
   });
 
-  const result = await sys.context({ subject: { id: "user:caller" } }).can(
-    "users.read",
-    ["user:abc"],
-  );
+  const result = await sys
+    .context({ subject: { id: "user:caller" } })
+    .can("users.read", ["user:abc"]);
   assertEquals(result.ok, true);
 });
