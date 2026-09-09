@@ -29,6 +29,15 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # `Verify before publishing` runs the whole suite, five cases of which
+      # talk to a real MongoDB — so the release gate needs the server just as
+      # the CI job does. A standalone is enough: no transactions.
+      - name: Start MongoDB
+        uses: supercharge/mongodb-github-action@1.12.0
+        with:
+          mongodb-version: '6.0'
+          mongodb-port: 27017
+
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
