@@ -67,13 +67,21 @@ export type {
 } from "./permission.ts";
 
 // ─── System ──────────────────────────────────────────────────────────────
-export { createSystem } from "./system.ts";
+export {
+  createSystem,
+  isCapabilityQuery,
+  isWildcardSegment,
+  refType,
+} from "./system.ts";
 export type {
   CanContext,
+  PermissionErrorEvent,
   Provider,
+  ProviderFetchEvent,
   ProviderFn,
   ProviderObject,
   System,
+  SystemHooks,
 } from "./system.ts";
 
 // ─── Field-projection helpers (used outside permission checks too) ───────
