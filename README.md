@@ -127,14 +127,43 @@ the caller deserves to know why.
 ### Providers
 
 A provider turns a subject into grants. Several may be combined, and a subject
-is allowed when any single grant satisfies the permission's rules.
+is allowed when any single grant satisfies the permission's rules. A grant names
+one permission key; there is no wildcard key, so an administrator is granted the
+intermediate keys that expand to everything they hold.
 
 ```ts
 providers: [
   (subject) => db.grants.find({ userId: subject.id }).toArray(),
-  (subject) => (subject.isAdmin ? [{ key: "*", target: ["*"] }] : []),
+  (subject) =>
+    subject.isAdmin ? [{ key: "posts.manage", target: ["post:*"] }] : [],
 ]
 ```
+
+A provider can also be an object, which lets the engine skip it and cache it:
+
+```ts
+{
+  name: "memberships",
+  keys: ["posts.manage"],
+  targetType: "post",
+  cacheKey: (subject) => subject.id,
+  fetch: (subject, key, target) => membershipGrants(subject.id, target?.[0]),
+}
+```
+
+| Field | Effect |
+| --- | --- |
+| `name` | how the provider is named in hooks and in the reasons of a deny |
+| `keys`, `matches` | the keys the provider emits; it is consulted for those and for every key they expand to |
+| `targetType` | consulted only when `target[0]` is one concrete id of that type (`"post:1"`, never `"post:*"`) |
+| `cacheKey` | grants are reused within a `context()` for the same key; return `undefined` to skip the cache |
+| `fetch` | returns the grants |
+
+A provider that throws, or whose `cacheKey` throws, contributes no grant. The
+check goes on with the others, so a failure can only narrow what a subject may
+do. The failure reaches `hooks.onError` and, when the check is denied, its
+`reasons`. A resource or rule that throws rejects only the grant that needed it,
+the same way.
 
 ## Filtering lists, not just single documents
 
@@ -177,10 +206,17 @@ const visible = applyFilter(post, result.data as FilterSpec);
 
 ## API reference
 
-### `createSystem({ schema, providers })`
+### `createSystem({ schema, providers, hooks })`
 
 Builds the engine. `schema` maps permission keys to `permission(...)`
-declarations; `providers` lists the grant sources. Returns a `System`:
+declarations; `providers` lists the grant sources; `hooks` observes them:
+
+| Hook | Called with |
+| --- | --- |
+| `onProviderFetch` | provider name, key, target, `durationMs`, `grantCount`, for every fetch that was not served from the cache |
+| `onError` | `{ source: "provider", provider, error, … }` or `{ source: "rule", grantId, error, … }` |
+
+A hook that throws never changes a decision. `createSystem` returns a `System`:
 
 | Member | Purpose |
 | --- | --- |
@@ -225,11 +261,16 @@ type CanResult =
 `applyFilter`, `inputMatch`, `intermediate`, `matchPath`, `pickFields`,
 `requireSelf`, and the types they use.
 
+`isCapabilityQuery(target)`, `isWildcardSegment(segment)` and
+`refType(segment)` expose how the engine reads a target: a query with any
+wildcard segment (`"*"` or `"post:*"`) is a capability query, and `refType`
+returns the type of a `"type:id"` segment.
+
 ## Development
 
 ```bash
 bun install
-bun test          # 184 tests
+bun test          # 198 tests
 bun run check     # tsc
 bun run lint      # biome
 bun run build     # dist/ for npm

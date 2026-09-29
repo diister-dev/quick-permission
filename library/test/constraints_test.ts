@@ -1,8 +1,9 @@
 import { test } from "node:test";
-import { assertEquals } from "./+assert.ts";
+import { assert, assertEquals } from "./+assert.ts";
 import {
   createSystem,
   matchPath,
+  type PermissionErrorEvent,
   permission,
   resource,
   target,
@@ -359,7 +360,9 @@ test("constraints: $where operator rejected by whitelist", async () => {
     fetch: () => ({ _id: "u" }),
     dedupKey: ({ target }) => target[0] as string,
   });
+  const errors: PermissionErrorEvent[] = [];
   const sys = createSystem({
+    hooks: { onError: (event) => errors.push(event) },
     schema: {
       "users.read": permission({ target: target.required("user") }).rules([
         u.match(),
@@ -377,11 +380,11 @@ test("constraints: $where operator rejected by whitelist", async () => {
       ],
     ],
   });
-  let threw = false;
-  try {
-    await sys.context({ subject: { id: "s" } }).can("users.read", ["user:1"]);
-  } catch {
-    threw = true;
-  }
-  assertEquals(threw, true);
+  const result = await sys
+    .context({ subject: { id: "s" } })
+    .can("users.read", ["user:1"]);
+  assertEquals(result.ok, false);
+  assert(!result.ok && result.reasons.some((r) => r.includes("$where")));
+  assertEquals(errors.length, 1);
+  assertEquals(errors[0].source, "rule");
 });

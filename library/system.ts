@@ -1,21 +1,8 @@
-/**
- * Moteur d'orchestration resource-pipe.
- *
- * Responsabilités :
- *  - Maintenir un cache `(resource.id, dedupKey) → Promise<T>` par context()
- *  - Filtrer les rules actives (activeWhen) avant de fetcher leurs needs
- *  - Lancer les fetches en parallèle (Promise.all) avec dedup
- *  - Évaluer les rules d'un grant en série (préserve l'ordre des reasons)
- *  - OR sémantique entre grants : un grant qui passe = `ok: true`
- *  - Validation d'arity du target au boot et au check
- *
- * Cf. RFC §"Sémantique d'exécution".
- */
-
 import type {
   AnyTarget,
   CanResult,
   FetchCtx,
+  FilterContribution,
   Grant,
   IndirectResourceInfo,
   ListEntry,
@@ -45,25 +32,52 @@ export type ProviderFn = (
   target?: readonly unknown[],
 ) => readonly Grant[] | Promise<readonly Grant[]>;
 
-/**
- * Provider sous forme objet : permet d'opt-in à la dedup de grants
- * (cacheKey) et au filtrage par préfixe de key (keys/matches).
- *
- * - `keys`/`matches` : le provider est skip si la key demandée ne match pas
- * - `cacheKey` : grants memoizés par (subject, key, target) au sein d'un context
- */
 export type ProviderObject = {
+  readonly name?: string;
   readonly keys?: readonly string[];
   readonly matches?: (key: string) => boolean;
+  readonly targetType?: string | readonly string[];
   readonly cacheKey?: (
     subject: Subject,
     key: string,
     target?: readonly unknown[],
-  ) => string;
+  ) => string | undefined;
   readonly fetch: ProviderFn;
 };
 
 export type Provider = ProviderFn | ProviderObject;
+
+export type ProviderFetchEvent = {
+  readonly provider: string;
+  readonly subject: Subject;
+  readonly key: string;
+  readonly target: readonly unknown[] | undefined;
+  readonly durationMs: number;
+  readonly grantCount: number;
+};
+
+export type PermissionErrorEvent =
+  | {
+      readonly source: "provider";
+      readonly provider: string;
+      readonly subject: Subject;
+      readonly key: string;
+      readonly target: readonly unknown[] | undefined;
+      readonly error: unknown;
+    }
+  | {
+      readonly source: "rule";
+      readonly grantId: string | undefined;
+      readonly subject: Subject;
+      readonly key: string;
+      readonly target: readonly unknown[] | undefined;
+      readonly error: unknown;
+    };
+
+export type SystemHooks = {
+  readonly onProviderFetch?: (event: ProviderFetchEvent) => void;
+  readonly onError?: (event: PermissionErrorEvent) => void;
+};
 
 function keyMatchesPattern(key: string, pattern: string): boolean {
   if (pattern === key) return true;
@@ -73,23 +87,54 @@ function keyMatchesPattern(key: string, pattern: string): boolean {
   return false;
 }
 
-function providerHandlesKey(provider: ProviderObject, key: string): boolean {
-  if (!provider.keys && !provider.matches) return true;
+function providerDeclaresKey(provider: ProviderObject, key: string): boolean {
   if (provider.keys?.some((p) => keyMatchesPattern(key, p))) return true;
-  if (provider.matches?.(key)) return true;
-  return false;
+  return provider.matches?.(key) === true;
+}
+
+export function refType(segment: unknown): string | undefined {
+  if (typeof segment !== "string") return undefined;
+  const colon = segment.indexOf(":");
+  return colon > 0 ? segment.slice(0, colon) : undefined;
+}
+
+function providerHandlesTarget(
+  provider: ProviderObject,
+  target: readonly unknown[] | undefined,
+): boolean {
+  if (provider.targetType === undefined) return true;
+  const first = target?.[0];
+  if (first === undefined || isWildcardSegment(first)) return false;
+  const type = refType(first);
+  if (type === undefined) return false;
+  return typeof provider.targetType === "string"
+    ? provider.targetType === type
+    : provider.targetType.includes(type);
+}
+
+type ProviderOutcome = {
+  readonly grants: readonly Grant[];
+  readonly failure?: string;
+};
+
+type GrantsCache = Map<Provider, Map<string, Promise<ProviderOutcome>>>;
+
+function callHook(invoke: () => void): void {
+  try {
+    invoke();
+  } catch {
+    return;
+  }
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export type CanContext = {
   readonly checkDate?: Date;
   readonly checkIp?: string;
-  /** True : le target peut contenir des wildcards et matche les grants overlap. */
-  readonly broadMatch?: boolean;
-  /**
-   * Check-time payload exposed to rules as `ctx.input`. Distinct from
-   * `grant.payload` (static, seed-time). Consumed by `inputMatch()` to
-   * validate a CREATE body against `grant.with`.
-   */
+  /** Check-time payload read by `inputMatch()`, as opposed to the grant's static `payload`. */
   readonly input?: unknown;
 };
 
@@ -97,60 +142,28 @@ export type System<TMeta = unknown> = {
   list(): readonly ListEntry<TMeta>[];
   tree(): { readonly children: Readonly<Record<string, TreeNode<TMeta>>> };
   schema(key: string): Permission<TMeta> | undefined;
-  /**
-   * Every distinct indirect resource referenced by the schema's rules,
-   * deduped by id. Returned in declaration-walk order (first-occurrence
-   * wins for dedup). Function fields are stripped — see
-   * `IndirectResourceInfo`. Empty if no permission uses `.match()` on an
-   * `indirectResource`.
-   */
+  /** Deduplicated by id, in declaration order, without their functions. */
   indirectResources(): readonly IndirectResourceInfo[];
-  /**
-   * Indirect resources referenced by a single permission's rules.
-   * `[]` if `key` is unknown or has no `indirect-match` rule. Useful so
-   * matrix UIs only render the indirect-match editor on permissions where
-   * it has a semantic.
-   */
   indirectsUsedBy(key: string): readonly IndirectResourceInfo[];
-  /** Check direct (sans cache cross-can) — préfère `context()` en HTTP. */
+  /** Nothing is cached across calls; prefer `context()` for a request. */
   can(
     subject: Subject,
     key: string,
     target?: readonly unknown[],
     context?: CanContext,
   ): Promise<CanResult>;
-  /**
-   * Crée un context request-scoped avec cache de fetches partagé entre
-   * tous les `can()` qui en découlent.
-   */
+  /** Resources and provider grants are cached across every `can()` of the context. */
   context(bound: { readonly subject: Subject } & CanContext): {
-    /**
-     * `perCall` overrides the bound `CanContext` for this single check.
-     * Canonical use : passing `input` for a CREATE while keeping the
-     * shared (per-request) context. Other fields stay bound — override
-     * only when truly per-call.
-     */
+    /** `perCall` overrides the bound context for this check only, typically `input` on a create. */
     can(
       key: string,
       target?: readonly unknown[],
       perCall?: CanContext,
     ): Promise<CanResult>;
     /**
-     * Inject pre-loaded docs into the resource cache so subsequent
-     * `can()` calls skip the fetch. Typical use : after a paginated
-     * list, the caller has all docs in memory — pre-seed them so the
-     * per-doc projection check doesn't hit the DB again.
-     *
-     * `dedupKey(doc)` MUST return the same target segments the resource's
-     * `dedupKey` would compute at fetch time — otherwise the cache key
-     * won't match and the preseed is silently ineffective. For most
-     * resources whose dedupKey is `target[i]`, just return `[doc._id]`
-     * (or the relevant segments).
-     *
-     * `value(doc)` is optional. Defaults to identity (the doc itself,
-     * used for direct resources). Provide it for indirect resources
-     * where the cached value is an array of joined docs nested under
-     * an alias (e.g. `d => d._memberships_of_participant`).
+     * `dedupKey(doc)` must return the segments the resource's own `dedupKey`
+     * computes at fetch time, or the seeded value is never found. `value(doc)`
+     * defaults to the doc; an indirect resource caches its joined docs instead.
      */
     preseed<T, V = T>(
       resource: Resource<unknown> | IndirectResource | string,
@@ -160,16 +173,13 @@ export type System<TMeta = unknown> = {
         value?: (doc: T) => V;
       },
     ): void;
-    /** Compteurs de fetches par resource.id (debug / observabilité). */
     getFetchCounters(): Readonly<Record<string, number>>;
-    /** Reset des compteurs (pas du cache). */
+    /** Resets the counters, never the cache. */
     clearCounters(): void;
-    /** Dump des grants émis dans ce context (debug). */
+    /** Only the grants of cached providers already consulted in this context. */
     dumpGrants(): Promise<readonly Grant[]>;
   };
 };
-
-// ─── Schema validation au boot ──────────────────────────────────────────
 
 function validateSchema<TMeta>(
   schema: Readonly<Record<string, Permission<TMeta>>>,
@@ -184,7 +194,6 @@ function validateSchema<TMeta>(
         target: ["*"],
       });
     } catch {
-      // Best-effort : si expandsTo throw sur le stub, on skip.
       continue;
     }
     for (const child of samples) {
@@ -200,29 +209,19 @@ function validateSchema<TMeta>(
   }
 }
 
-// ─── Target matching (wildcards par segment) ────────────────────────────
-
 function asPath(value: unknown): readonly unknown[] {
   return Array.isArray(value) ? value : [value];
 }
 
-/**
- * Une request target est une "capability query" si elle contient au moins
- * un wildcard (`"*"` ou suffix `":*"`). Dans ce mode, on n'a pas de
- * ressource concrète à fetcher — les rules font silent-pass quand elles
- * ne peuvent pas vérifier leur contrainte.
- */
-function isCapabilityQuery(target: readonly unknown[] | undefined): boolean {
+/** A query with any wildcard segment asks "could this subject, on some target"; rules that need a concrete document pass silently. */
+export function isCapabilityQuery(
+  target: readonly unknown[] | undefined,
+): boolean {
   if (!target) return false;
   return target.some(isWildcardSegment);
 }
 
-/**
- * True if a single target segment is a wildcard (`"*"` or `"xxx:*"`).
- * Inverse de "concret" — utilisé pour décider si une resource peut être
- * fetchée en cap-mode (segment concret → fetch OK).
- */
-function isWildcardSegment(seg: unknown): boolean {
+export function isWildcardSegment(seg: unknown): boolean {
   return seg === "*" || (typeof seg === "string" && seg.endsWith("*"));
 }
 
@@ -247,17 +246,10 @@ function targetMatches(
   capability: boolean,
 ): boolean {
   if (schemaKind === "none") return true;
-  if (grantTarget === undefined) {
-    // A target-less grant only matches when the schema permits it.
-    // `optional` documents this "global grant" mode; `required` and `path`
-    // require the grant to carry a target.
-    return schemaKind === "optional";
-  }
+  if (grantTarget === undefined) return schemaKind === "optional";
   if (requestTarget === undefined) return false;
   const g = asPath(grantTarget);
   if (g.length !== requestTarget.length) return false;
-  // Capability mode (request has wildcards) uses overlap semantics so a
-  // specific-target grant like ["user:lucas"] still matches ["user:*"].
   if (capability) {
     return g.every((seg, i) => segmentOverlaps(seg, requestTarget[i]));
   }
@@ -274,8 +266,6 @@ function targetMatches(
   });
 }
 
-// ─── Intermediate expansion ──────────────────────────────────────────────
-
 function expandGrants<TMeta>(
   grants: readonly Grant[],
   schema: Readonly<Record<string, Permission<TMeta>>>,
@@ -286,13 +276,9 @@ function expandGrants<TMeta>(
     grant: g,
     depth: 0,
   }));
-  while (queue.length) {
-    const { grant, depth } = queue.shift()!;
+  for (let head = 0; head < queue.length; head++) {
+    const { grant, depth } = queue[head];
     const perm = schema[grant.key];
-    // Drop grants that violate the schema's target contract: a grant
-    // without `target` on a `required` / `path` schema cannot match
-    // (see `targetMatches`) and its `expandsTo` cannot synthesize valid
-    // children. Skip silently so one bad grant doesn't break the call.
     if (
       perm &&
       grant.target === undefined &&
@@ -311,8 +297,6 @@ function expandGrants<TMeta>(
   }
   return out;
 }
-
-// ─── Serialization (pour list/tree) ──────────────────────────────────────
 
 function serializeSegment(s: {
   readonly name: string;
@@ -366,91 +350,64 @@ function collectIndirectsForPermission<TMeta>(
   return Array.from(collected.values());
 }
 
-/**
- * Build a wildcard target stub matching the schema's arity. Used to sample
- * `expandsTo(grant)` at catalog enumeration time — we don't have a real
- * grant target available, but we need ARG_ARITY to match or `targetMatches`
- * would drop the synthesized child grants (see `expandGrants:228-234`).
- *
- *  - none      → undefined (no segments)
- *  - optional  → ["*"]
- *  - required  → ["*"]
- *  - path(n)   → ["*", "*", ..., "*"] (n segments)
- */
 function stubTargetFor(t: AnyTarget): readonly unknown[] | undefined {
   if (t.kind === "none") return undefined;
   if (t.kind === "optional" || t.kind === "required") return ["*"];
   return t.segments.map(() => "*");
 }
 
-// ─── Descendant computation (pour list/tree) ─────────────────────────────
+type ExpansionGraph = {
+  readonly descendants: ReadonlyMap<string, readonly string[]>;
+  readonly ancestors: ReadonlyMap<string, readonly string[]>;
+};
 
-/**
- * BFS transitive expansion of an intermediate's `expandsTo` callback,
- * collecting LEAVES only (keys whose schema entry has no `expandsTo`).
- *
- * Sampling strategy : we call `perm.expandsTo({ key, target: <wildcard> })`
- * with an arity-matched wildcard stub. Real consumers (`expandGrants`)
- * call expandsTo with a concrete grant carrying `with`/`filter`/`flags` —
- * but for catalog enumeration we only care about the resulting child KEYS
- * (the same keys would be produced regardless of grant payload, since
- * macros are by convention pure key-routers).
- *
- * Defensive : caught exceptions in `expandsTo` (e.g. a callback that
- * asserts on a concrete segment) silently drop that branch — same posture
- * as `validateSchema`. Cycles are broken by the `visited` set.
- *
- * Returns `undefined` if `rootKey` is a leaf or not in schema (the caller
- * uses this signal to omit the field from the serialized entry rather
- * than emit an empty array).
- */
-function computeDescendants<TMeta>(
-  rootKey: string,
+// An intermediate is sampled with a wildcard grant: by convention `expandsTo`
+// routes keys and does not depend on the grant's target or payload.
+function expansionGraph<TMeta>(
   schema: Readonly<Record<string, Permission<TMeta>>>,
   maxDepth = 10,
-): readonly string[] | undefined {
-  const root = schema[rootKey];
-  if (!root?.expandsTo) return undefined;
-
-  const leaves = new Set<string>();
-  const visited = new Set<string>([rootKey]);
-  const queue: Array<{ key: string; depth: number }> = [
-    { key: rootKey, depth: 0 },
-  ];
-
-  while (queue.length) {
-    const { key, depth } = queue.shift()!;
-    const perm = schema[key];
-    if (!perm) continue;
-    if (!perm.expandsTo) {
-      // Leaf reached. Exclude the root itself from its own descendant list.
-      if (key !== rootKey) leaves.add(key);
-      continue;
+): ExpansionGraph {
+  const descendants = new Map<string, string[]>();
+  const ancestors = new Map<string, string[]>();
+  for (const [rootKey, root] of Object.entries(schema)) {
+    if (!root.expandsTo) continue;
+    const leaves: string[] = [];
+    const visited = new Set<string>([rootKey]);
+    const queue: Array<{ key: string; depth: number }> = [
+      { key: rootKey, depth: 0 },
+    ];
+    for (let head = 0; head < queue.length; head++) {
+      const { key, depth } = queue[head];
+      const perm = schema[key];
+      if (!perm) continue;
+      if (!perm.expandsTo) {
+        leaves.push(key);
+        continue;
+      }
+      if (depth >= maxDepth) continue;
+      let children: readonly Grant[] = [];
+      try {
+        children = perm.expandsTo({ key, target: stubTargetFor(perm.target) });
+      } catch {
+        continue;
+      }
+      for (const child of children) {
+        if (visited.has(child.key)) continue;
+        visited.add(child.key);
+        const list = ancestors.get(child.key) ?? [];
+        list.push(rootKey);
+        ancestors.set(child.key, list);
+        queue.push({ key: child.key, depth: depth + 1 });
+      }
     }
-    if (depth >= maxDepth) continue;
-    let children: readonly Grant[] = [];
-    try {
-      children = perm.expandsTo({
-        key,
-        target: stubTargetFor(perm.target),
-      });
-    } catch {
-      // Stub-throwing macro — best-effort skip, same as validateSchema.
-      continue;
-    }
-    for (const child of children) {
-      if (visited.has(child.key)) continue;
-      visited.add(child.key);
-      queue.push({ key: child.key, depth: depth + 1 });
-    }
+    descendants.set(rootKey, leaves);
   }
-  return [...leaves];
+  return { descendants, ancestors };
 }
-
-// ─── Tree builder ────────────────────────────────────────────────────────
 
 function buildTree<TMeta>(
   schema: Readonly<Record<string, Permission<TMeta>>>,
+  graph: ExpansionGraph,
 ): { children: Record<string, TreeNode<TMeta>> } {
   const root: { children: Record<string, TreeNode<TMeta>> } = { children: {} };
 
@@ -491,9 +448,7 @@ function buildTree<TMeta>(
       }
     }
     const leafName = parts[parts.length - 1];
-    const descendants = perm.expandsTo
-      ? computeDescendants(key, schema)
-      : undefined;
+    const descendants = graph.descendants.get(key);
     cursor.children[leafName] = {
       kind: perm.expandsTo ? "intermediate" : "permission",
       key,
@@ -507,20 +462,41 @@ function buildTree<TMeta>(
   return root;
 }
 
-// ─── createSystem ────────────────────────────────────────────────────────
-
 export function createSystem<TMeta = unknown>(opts: {
   readonly schema: Readonly<Record<string, Permission<TMeta>>>;
   readonly providers?: readonly Provider[];
+  readonly hooks?: SystemHooks;
 }): System<TMeta> {
-  const { schema, providers = [] } = opts;
+  const { schema, providers = [], hooks = {} } = opts;
   validateSchema(schema);
 
-  // Resource registry built at boot from all rules' `needs` (direct
-  // resources) and indirect descriptors. Enables `ctx.preseed("id", ...)`
-  // to look up the resource by id — callers don't need to import the
-  // resource instance (handy when it lives inside a factory closure).
-  // Typo guard : throws with the list of available ids when missed.
+  const graph = expansionGraph(schema);
+  const providerNames = new Map<Provider, string>(
+    providers.map((provider, index) => [
+      provider,
+      (typeof provider === "object" && provider.name) || `provider#${index}`,
+    ]),
+  );
+  const handledKeys = new Map<ProviderObject, Map<string, boolean>>();
+
+  function providerHandlesKey(provider: ProviderObject, key: string): boolean {
+    if (!provider.keys && !provider.matches) return true;
+    let memo = handledKeys.get(provider);
+    if (!memo) {
+      memo = new Map();
+      handledKeys.set(provider, memo);
+    }
+    const known = memo.get(key);
+    if (known !== undefined) return known;
+    const handled =
+      providerDeclaresKey(provider, key) ||
+      (graph.ancestors.get(key) ?? []).some((ancestor) =>
+        providerDeclaresKey(provider, ancestor),
+      );
+    memo.set(key, handled);
+    return handled;
+  }
+
   const resourceRegistry = new Map<
     string,
     Resource<unknown> | IndirectResource
@@ -538,9 +514,7 @@ export function createSystem<TMeta = unknown>(opts: {
   return {
     list() {
       return Object.entries(schema).map(([key, perm]) => {
-        const descendants = perm.expandsTo
-          ? computeDescendants(key, schema)
-          : undefined;
+        const descendants = graph.descendants.get(key);
         return {
           key,
           kind: perm.expandsTo
@@ -555,7 +529,7 @@ export function createSystem<TMeta = unknown>(opts: {
     },
 
     tree() {
-      return buildTree<TMeta>(schema);
+      return buildTree<TMeta>(schema, graph);
     },
 
     schema(key) {
@@ -584,7 +558,7 @@ export function createSystem<TMeta = unknown>(opts: {
 
     context(bound) {
       const cache = new Map<string, Promise<unknown>>();
-      const grantsCache = new Map<string, Promise<readonly Grant[]>>();
+      const grantsCache: GrantsCache = new Map();
       const fetchCounters = new Map<string, number>();
       const { subject, ...boundCtx } = bound;
       const resolveResource = (
@@ -627,22 +601,66 @@ export function createSystem<TMeta = unknown>(opts: {
           fetchCounters.clear();
         },
         async dumpGrants() {
-          const arrays = await Promise.all(grantsCache.values());
-          return arrays.flat();
+          const outcomes = await Promise.all(
+            [...grantsCache.values()].flatMap((byKey) => [...byKey.values()]),
+          );
+          return outcomes.flatMap((outcome) => outcome.grants);
         },
       };
     },
   };
 
-  // ─── Implémentation can() ─────────────────────────────────────────────
-
   type ContextState = {
-    /** Cache des fetches de Resource au sein d'un context. */
     readonly cache: Map<string, Promise<unknown>>;
-    /** Cache des grants émis par les providers (pour cacheKey). */
-    readonly grantsCache: Map<string, Promise<readonly Grant[]>>;
+    readonly grantsCache: GrantsCache;
     readonly fetchCounters: Map<string, number>;
   };
+
+  function reportError(event: PermissionErrorEvent): void {
+    callHook(() => hooks.onError?.(event));
+  }
+
+  async function fetchFromProvider(
+    provider: Provider,
+    name: string,
+    subject: Subject,
+    key: string,
+    target: readonly unknown[] | undefined,
+  ): Promise<ProviderOutcome> {
+    const started = performance.now();
+    let grants: readonly Grant[];
+    try {
+      grants =
+        typeof provider === "function"
+          ? await provider(subject, key, target)
+          : await provider.fetch(subject, key, target);
+    } catch (error) {
+      reportError({
+        source: "provider",
+        provider: name,
+        subject,
+        key,
+        target,
+        error,
+      });
+      return {
+        grants: [],
+        failure: `provider ${name} failed: ${describeError(error)}`,
+      };
+    }
+    const durationMs = performance.now() - started;
+    callHook(() =>
+      hooks.onProviderFetch?.({
+        provider: name,
+        subject,
+        key,
+        target,
+        durationMs,
+        grantCount: grants.length,
+      }),
+    );
+    return { grants };
+  }
 
   async function invokeProvider(
     provider: Provider,
@@ -650,21 +668,46 @@ export function createSystem<TMeta = unknown>(opts: {
     key: string,
     target: readonly unknown[] | undefined,
     state: ContextState | undefined,
-  ): Promise<readonly Grant[]> {
-    if (typeof provider === "function") {
-      return await provider(subject, key, target);
+  ): Promise<ProviderOutcome> {
+    const name = providerNames.get(provider) ?? "provider";
+    if (typeof provider === "object") {
+      if (!providerHandlesKey(provider, key)) return { grants: [] };
+      if (!providerHandlesTarget(provider, target)) return { grants: [] };
     }
-    if (!providerHandlesKey(provider, key)) return [];
-    const ck = provider.cacheKey?.(subject, key, target);
-    if (state && ck) {
-      let pending = state.grantsCache.get(ck);
-      if (!pending) {
-        pending = Promise.resolve(provider.fetch(subject, key, target));
-        state.grantsCache.set(ck, pending);
-      }
-      return await pending;
+    let ck: string | undefined;
+    try {
+      ck =
+        typeof provider === "object"
+          ? provider.cacheKey?.(subject, key, target)
+          : undefined;
+    } catch (error) {
+      reportError({
+        source: "provider",
+        provider: name,
+        subject,
+        key,
+        target,
+        error,
+      });
+      return {
+        grants: [],
+        failure: `provider ${name} failed: ${describeError(error)}`,
+      };
     }
-    return await provider.fetch(subject, key, target);
+    if (!state || !ck) {
+      return fetchFromProvider(provider, name, subject, key, target);
+    }
+    let byKey = state.grantsCache.get(provider);
+    if (!byKey) {
+      byKey = new Map();
+      state.grantsCache.set(provider, byKey);
+    }
+    let pending = byKey.get(ck);
+    if (!pending) {
+      pending = fetchFromProvider(provider, name, subject, key, target);
+      byKey.set(ck, pending);
+    }
+    return pending;
   }
 
   async function fetchResource(
@@ -673,7 +716,6 @@ export function createSystem<TMeta = unknown>(opts: {
     state: ContextState | undefined,
   ): Promise<unknown> {
     if (!state) {
-      // Mode `system.can()` direct — pas de cache cross-grant.
       return Promise.resolve(resource.fetcher(ctx));
     }
     const key = resource.computeDedupKey(ctx);
@@ -725,17 +767,18 @@ export function createSystem<TMeta = unknown>(opts: {
     const arityErr = validateArity(perm, target);
     if (arityErr) return { ok: false, reasons: [arityErr] };
 
-    // Collect grants depuis les providers (en série pour préserver l'ordre)
     const allGrants: Grant[] = [];
+    const failures: string[] = [];
     for (const provider of providers) {
-      const grants = await invokeProvider(
+      const outcome = await invokeProvider(
         provider,
         subject,
         key,
         target,
         state,
       );
-      allGrants.push(...grants);
+      allGrants.push(...outcome.grants);
+      if (outcome.failure) failures.push(outcome.failure);
     }
 
     const expanded = expandGrants(allGrants, schema);
@@ -747,26 +790,16 @@ export function createSystem<TMeta = unknown>(opts: {
         targetMatches(g.target, target, perm.target.kind, capability),
     );
     if (matching.length === 0) {
-      return { ok: false, reasons: ["no matching grant"] };
+      return { ok: false, reasons: ["no matching grant", ...failures] };
     }
 
     const reasons: string[] = [];
     let lastData: unknown = undefined;
     const matchedGrantIds: string[] = [];
     let anyOk = false;
-    // One entry per matched grant. undefined = "any" (no constraint).
     const collectedConstraints: Array<Record<string, unknown> | undefined> = [];
-    // Filter rule cross-grant aggregation. `null` once any grant exposes
-    // no filter (= all fields). Else accumulates the union of filter specs.
     let referenceSource: unknown = undefined;
     let filterUnion: FilterUnion = undefined;
-    // Grants that PASSED their rules — needed by indirect-resource
-    // aggregation. `matching` contains all grants that match key + target
-    // shape, but rules can reject some (e.g. a `with` spec evaluated
-    // against an auto-fetched resource in cap-mode). The indirect
-    // orchestrator must consider only successful grants — otherwise a
-    // rejected grant without indirect reference would trigger any-wins
-    // and disable the filter.
     const successfulGrants: Grant[] = [];
 
     for (const grant of matching) {
@@ -785,20 +818,8 @@ export function createSystem<TMeta = unknown>(opts: {
         return r.needs.every((res) => res.isActiveFor(grant));
       });
 
-      // In cap-mode the engine normally skips all fetches. Exception : a
-      // resource whose `id` matches a segment NAME of the permission's
-      // target AND whose corresponding segment in the request target is
-      // CONCRETE (not `*` / not `xxx:*`) is fetched anyway. This lets
-      // `match()` evaluate properly for foreign resources (auxiliary
-      // checks like "the request's exposition belongs to my tenant")
-      // when only one segment of a multi-segment target is wildcard.
-      //
-      // Auto-binding is by convention : `resource.id === segment.name`.
-      // No opt-in needed — it just works if the convention is respected.
-      // Resources whose id matches no segment in the permission's schema
-      // are skipped in cap-mode (silent-pass + constraint emit, the
-      // legacy behaviour that powers `users.read` + `userOf.match`
-      // self-referencing pushdown).
+      // A capability query still fetches a resource named like a segment
+      // (`resource.id === segment.name`) when that segment is concrete.
       const requestTarget = target ?? [];
       const targetSegmentIndexById = (() => {
         const out = new Map<string, number>();
@@ -833,85 +854,91 @@ export function createSystem<TMeta = unknown>(opts: {
                 .map((r) => [r.id, r] as const),
             ).values(),
           );
-      const fetched = new Map<string, unknown>();
-      await Promise.all(
-        uniqueResources.map(async (r) => {
-          fetched.set(r.id, await fetchResource(r, ctx, state));
-        }),
-      );
-
-      // In concrete mode, indirect resources that declared a `fetcher`
-      // are fetched as well (their joined docs are attached to the ctx
-      // so `indirect.match()` can evaluate the spec). The cache key is
-      // target-derived so `CanContext.preseed()` can inject values
-      // produced by a cap-mode pipeline aggregation (no DB hit when
-      // listed docs already carry the `_lookupAlias`).
-      const indirectFetched = new Map<string, readonly unknown[]>();
-      if (!capability) {
-        const indirectsToFetch = perm.rules
-          .map((r) => extractIndirectResource(r))
-          .filter(
-            (ir): ir is IndirectResource =>
-              ir !== null && ir.fetcher !== undefined,
-          );
-        await Promise.all(
-          indirectsToFetch.map(async (ir) => {
-            const sourceDoc = fetched.get(ir.from.id);
-            if (sourceDoc === undefined || sourceDoc === null) return;
-            const cacheKey = ir.cacheKeyForTarget(ctx.target);
-            if (state) {
-              const existing = state.cache.get(cacheKey);
-              if (existing) {
-                indirectFetched.set(
-                  ir.id,
-                  (await existing) as readonly unknown[],
-                );
-                return;
-              }
-              const pending = Promise.resolve(ir.fetcher!(sourceDoc, ctx));
-              state.cache.set(cacheKey, pending);
-              indirectFetched.set(ir.id, await pending);
-            } else {
-              indirectFetched.set(ir.id, await ir.fetcher!(sourceDoc, ctx));
-            }
-          }),
-        );
-      }
-
-      // Attach indirect-fetched joined docs to the context so
-      // `indirect.match()` rule can read them.
-      const ctxWithIndirect = Object.assign({}, ctx, {
-        _indirectFetched: indirectFetched,
-      });
-
       let grantOk = true;
       let grantData: unknown = undefined;
-      // Multiple match rules in one permission (e.g., expositionInfo + badge)
-      // contribute distinct constraints — AND-merge them per grant.
       const grantConstraints: Record<string, unknown>[] = [];
+      const grantFilters: FilterContribution[] = [];
       let grantHasMatchRule = false;
-      for (const rule of activeRules) {
-        if (rule.descriptor.kind === "match") grantHasMatchRule = true;
-        const data = rule.needs.map((r) => fetched.get(r.id));
-        const result = rule.check(data, ctxWithIndirect);
-        if (!result.ok) {
-          grantOk = false;
-          reasons.push(
-            grant.id ? `[${grant.id}] ${result.reason}` : result.reason,
+      try {
+        const fetched = new Map<string, unknown>();
+        await Promise.all(
+          uniqueResources.map(async (r) => {
+            fetched.set(r.id, await fetchResource(r, ctx, state));
+          }),
+        );
+
+        const indirectFetched = new Map<string, readonly unknown[]>();
+        if (!capability) {
+          const indirectsToFetch = perm.rules
+            .map((r) => extractIndirectResource(r))
+            .filter(
+              (ir): ir is IndirectResource =>
+                ir !== null && ir.fetcher !== undefined,
+            );
+          await Promise.all(
+            indirectsToFetch.map(async (ir) => {
+              const sourceDoc = fetched.get(ir.from.id);
+              if (sourceDoc === undefined || sourceDoc === null) return;
+              const cacheKey = ir.cacheKeyForTarget(ctx.target);
+              if (state) {
+                const existing = state.cache.get(cacheKey);
+                if (existing) {
+                  indirectFetched.set(
+                    ir.id,
+                    (await existing) as readonly unknown[],
+                  );
+                  return;
+                }
+                const pending = Promise.resolve(ir.fetcher!(sourceDoc, ctx));
+                state.cache.set(cacheKey, pending);
+                indirectFetched.set(ir.id, await pending);
+              } else {
+                indirectFetched.set(ir.id, await ir.fetcher!(sourceDoc, ctx));
+              }
+            }),
           );
-          break;
         }
-        if (result.data !== undefined) grantData = result.data;
-        if (result.constraint !== undefined) {
-          grantConstraints.push(result.constraint);
+
+        const ctxWithIndirect = Object.assign({}, ctx, {
+          _indirectFetched: indirectFetched,
+        });
+
+        for (const rule of activeRules) {
+          if (rule.descriptor.kind === "match") grantHasMatchRule = true;
+          const data = rule.needs.map((r) => fetched.get(r.id));
+          const result = rule.check(data, ctxWithIndirect);
+          if (!result.ok) {
+            grantOk = false;
+            reasons.push(
+              grant.id ? `[${grant.id}] ${result.reason}` : result.reason,
+            );
+            break;
+          }
+          if (result.data !== undefined) grantData = result.data;
+          if (result.constraint !== undefined) {
+            grantConstraints.push(result.constraint);
+          }
+          if (result.filter !== undefined) grantFilters.push(result.filter);
         }
-        if (result.filter !== undefined) {
-          referenceSource = result.filter.source;
-          filterUnion = mergeFilterSpec(filterUnion, result.filter.spec);
-        }
+      } catch (error) {
+        grantOk = false;
+        reportError({
+          source: "rule",
+          grantId: grant.id,
+          subject,
+          key,
+          target,
+          error,
+        });
+        const reason = `rule evaluation failed: ${describeError(error)}`;
+        reasons.push(grant.id ? `[${grant.id}] ${reason}` : reason);
       }
 
       if (grantOk) {
+        for (const contribution of grantFilters) {
+          referenceSource = contribution.source;
+          filterUnion = mergeFilterSpec(filterUnion, contribution.spec);
+        }
         anyOk = true;
         successfulGrants.push(grant);
         if (grant.id) matchedGrantIds.push(grant.id);
@@ -928,7 +955,10 @@ export function createSystem<TMeta = unknown>(opts: {
     if (!anyOk) {
       return {
         ok: false,
-        reasons: reasons.length > 0 ? reasons : ["no matching grant"],
+        reasons: [
+          ...(reasons.length > 0 ? reasons : ["no matching grant"]),
+          ...failures,
+        ],
       };
     }
 
@@ -939,10 +969,6 @@ export function createSystem<TMeta = unknown>(opts: {
       lastData,
     );
 
-    // Collect indirect resources referenced by the permission's rules
-    // (sentinel rules with descriptor.kind === "indirect-match"). If any
-    // are referenced by matched grants' `with`, emit an aggregation
-    // pipeline that pushes the JOIN constraint to the DB.
     const declaredIndirect: IndirectResource[] = [];
     for (const rule of perm.rules) {
       const ir = extractIndirectResource(rule);
@@ -951,10 +977,8 @@ export function createSystem<TMeta = unknown>(opts: {
     let stages: readonly Record<string, unknown>[] | undefined;
     if (declaredIndirect.length > 0) {
       const baseFilter = constraints ?? {};
-      // Must pass `successfulGrants` (rules accepted), NOT `matching`
-      // (raw key+target match). A grant rejected by a rule must not
-      // contribute to indirect any-wins — otherwise it would silently
-      // disable the indirect filter for its siblings.
+      // A rejected grant without an indirect reference would win "any" and
+      // lift the join filter for its siblings, so only accepted grants count.
       const result = buildAggregationStages(
         baseFilter,
         successfulGrants,
