@@ -94,6 +94,7 @@ class ResourceImpl<T> implements Resource<T> {
     return defineRule({
       kind: "match",
       needs: [this] as const,
+      fetchWhen: (grant) => grant.with?.[id] !== undefined,
       check: ([data], _payload, ctx) => {
         const spec = ctx.grant.with?.[id];
         if (spec === undefined) return { ok: true };

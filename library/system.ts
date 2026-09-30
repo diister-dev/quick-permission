@@ -8,6 +8,7 @@ import type {
   ListEntry,
   Permission,
   Resource,
+  Rule,
   SerializableSegment,
   SerializableTarget,
   Subject,
@@ -511,6 +512,42 @@ export function createSystem<TMeta = unknown>(opts: {
     }
   }
 
+  type PermissionPlan = {
+    readonly segmentIndexById: ReadonlyMap<string, number>;
+    readonly fetchableIndirects: readonly {
+      readonly rule: Rule;
+      readonly ir: IndirectResource;
+    }[];
+    readonly declaredIndirects: readonly IndirectResource[];
+  };
+  const plans = new Map<Permission<TMeta>, PermissionPlan>();
+
+  function planFor(perm: Permission<TMeta>): PermissionPlan {
+    const known = plans.get(perm);
+    if (known) return known;
+    const segmentIndexById = new Map<string, number>();
+    if (perm.target.kind !== "none") {
+      const segments =
+        perm.target.kind === "path"
+          ? perm.target.segments
+          : [perm.target.segments[0]];
+      segments.forEach((seg, i) => {
+        if (seg) segmentIndexById.set(seg.name, i);
+      });
+    }
+    const fetchableIndirects: { rule: Rule; ir: IndirectResource }[] = [];
+    const declaredIndirects: IndirectResource[] = [];
+    for (const rule of perm.rules) {
+      const ir = extractIndirectResource(rule);
+      if (!ir) continue;
+      declaredIndirects.push(ir);
+      if (ir.fetcher !== undefined) fetchableIndirects.push({ rule, ir });
+    }
+    const plan = { segmentIndexById, fetchableIndirects, declaredIndirects };
+    plans.set(perm, plan);
+    return plan;
+  }
+
   return {
     list() {
       return Object.entries(schema).map(([key, perm]) => {
@@ -801,6 +838,8 @@ export function createSystem<TMeta = unknown>(opts: {
     let referenceSource: unknown = undefined;
     let filterUnion: FilterUnion = undefined;
     const successfulGrants: Grant[] = [];
+    const plan = planFor(perm);
+    const requestTarget = target ?? [];
 
     for (const grant of matching) {
       const ctx: FetchCtx = {
@@ -818,65 +857,51 @@ export function createSystem<TMeta = unknown>(opts: {
         return r.needs.every((res) => res.isActiveFor(grant));
       });
 
-      // A capability query still fetches a resource named like a segment
-      // (`resource.id === segment.name`) when that segment is concrete.
-      const requestTarget = target ?? [];
-      const targetSegmentIndexById = (() => {
-        const out = new Map<string, number>();
-        if (perm.target.kind === "none") return out;
-        const segments =
-          perm.target.kind === "path"
-            ? perm.target.segments
-            : [perm.target.segments[0]];
-        segments.forEach((seg, i) => {
-          if (seg) out.set(seg.name, i);
-        });
-        return out;
-      })();
-      const uniqueResources = capability
-        ? Array.from(
-            new Map(
-              activeRules
-                .flatMap((r) => r.needs)
-                .filter((r) => {
-                  const idx = targetSegmentIndexById.get(r.id);
-                  if (idx === undefined) return false;
-                  const seg = requestTarget[idx];
-                  return seg !== undefined && !isWildcardSegment(seg);
-                })
-                .map((r) => [r.id, r] as const),
-            ).values(),
-          )
-        : Array.from(
-            new Map(
-              activeRules
-                .flatMap((r) => r.needs)
-                .map((r) => [r.id, r] as const),
-            ).values(),
-          );
       let grantOk = true;
       let grantData: unknown = undefined;
       const grantConstraints: Record<string, unknown>[] = [];
       const grantFilters: FilterContribution[] = [];
       let grantHasMatchRule = false;
       try {
+        const indirectsToFetch = new Map<string, IndirectResource>();
+        const indirectSources = new Set<string>();
+        if (!capability) {
+          for (const { rule, ir } of plan.fetchableIndirects) {
+            if (indirectsToFetch.has(ir.id)) continue;
+            if (grant.with?.[ir.id] === undefined) continue;
+            if (!activeRules.includes(rule)) continue;
+            indirectsToFetch.set(ir.id, ir);
+            indirectSources.add(ir.from.id);
+          }
+        }
+        const uniqueResources = new Map<string, Resource<unknown>>();
+        for (const rule of activeRules) {
+          const reads = rule.fetchWhen === undefined || rule.fetchWhen(grant);
+          for (const r of rule.needs) {
+            // A capability query still fetches a resource named like a segment
+            // (`resource.id === segment.name`) when that segment is concrete.
+            if (capability) {
+              const idx = plan.segmentIndexById.get(r.id);
+              if (idx === undefined) continue;
+              const seg = requestTarget[idx];
+              if (seg === undefined || isWildcardSegment(seg)) continue;
+            }
+            if (!reads && !indirectSources.has(r.id)) continue;
+            uniqueResources.set(r.id, r);
+          }
+        }
+
         const fetched = new Map<string, unknown>();
         await Promise.all(
-          uniqueResources.map(async (r) => {
+          Array.from(uniqueResources.values(), async (r) => {
             fetched.set(r.id, await fetchResource(r, ctx, state));
           }),
         );
 
         const indirectFetched = new Map<string, readonly unknown[]>();
-        if (!capability) {
-          const indirectsToFetch = perm.rules
-            .map((r) => extractIndirectResource(r))
-            .filter(
-              (ir): ir is IndirectResource =>
-                ir !== null && ir.fetcher !== undefined,
-            );
+        if (indirectsToFetch.size > 0) {
           await Promise.all(
-            indirectsToFetch.map(async (ir) => {
+            Array.from(indirectsToFetch.values(), async (ir) => {
               const sourceDoc = fetched.get(ir.from.id);
               if (sourceDoc === undefined || sourceDoc === null) return;
               const cacheKey = ir.cacheKeyForTarget(ctx.target);
@@ -969,11 +994,7 @@ export function createSystem<TMeta = unknown>(opts: {
       lastData,
     );
 
-    const declaredIndirect: IndirectResource[] = [];
-    for (const rule of perm.rules) {
-      const ir = extractIndirectResource(rule);
-      if (ir) declaredIndirect.push(ir);
-    }
+    const declaredIndirect = plan.declaredIndirects;
     let stages: readonly Record<string, unknown>[] | undefined;
     if (declaredIndirect.length > 0) {
       const baseFilter = constraints ?? {};

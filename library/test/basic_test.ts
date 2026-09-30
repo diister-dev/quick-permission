@@ -18,7 +18,15 @@ test("resource fetcher is invoked with subject + target + grant", async () => {
         userOf.match(),
       ]),
     },
-    providers: [() => [{ key: "users.read", target: ["user:abc"] }]],
+    providers: [
+      () => [
+        {
+          key: "users.read",
+          target: ["user:abc"],
+          with: { user: { name: "Alice" } },
+        },
+      ],
+    ],
   });
 
   const result = await sys

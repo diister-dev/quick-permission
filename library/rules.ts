@@ -35,6 +35,11 @@ export type DefineRuleOpts<RS extends readonly Resource<unknown>[], P> = {
    */
   readonly activeWhen?: (grant: Grant) => boolean;
   /**
+   * The rule stays active but reads its needs only when this returns true;
+   * `check` must then accept `undefined` data.
+   */
+  readonly fetchWhen?: (grant: Grant) => boolean;
+  /**
    * Métadonnées additionnelles fusionnées dans le `descriptor` (matrix UI).
    * Ne doit pas inclure les champs gérés automatiquement (kind/source/sources/flag).
    */
@@ -91,6 +96,7 @@ export function defineRule<
     descriptor: descriptor as Rule["descriptor"],
     needs,
     activeWhen,
+    ...(opts.fetchWhen !== undefined && { fetchWhen: opts.fetchWhen }),
     check: (data, ctx) => {
       const payload = ctx.grant.payload as P;
       const result = opts.check(data as ResourcesData<RS>, payload, ctx);

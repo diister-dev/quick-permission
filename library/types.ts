@@ -195,6 +195,11 @@ export interface Rule {
    */
   readonly activeWhen?: (grant: Grant) => boolean;
   /**
+   * When it returns false the rule still runs, but its needs are not fetched
+   * for this grant and `check` receives `undefined` in their place.
+   */
+  readonly fetchWhen?: (grant: Grant) => boolean;
+  /**
    * Logique d'évaluation. `data` est un tuple aligné sur `needs` (1 entrée
    * par need, dans l'ordre).
    */

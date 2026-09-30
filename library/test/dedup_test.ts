@@ -141,6 +141,10 @@ test("dedup partiel sur target path : expo=1, program=1, registration=2", async 
         {
           key: "registrations.read",
           target: ["exposition:*", "program:*", "registration:*"],
+          with: {
+            exposition: { _id: "exposition:e1" },
+            program: { _id: "program:p7" },
+          },
         },
       ],
     ],
@@ -216,7 +220,15 @@ test("compteurs de fetches reset via clearCounters", async () => {
         userOf.match(),
       ]),
     },
-    providers: [() => [{ key: "users.read", target: ["user:*"] }]],
+    providers: [
+      () => [
+        {
+          key: "users.read",
+          target: ["user:*"],
+          with: { user: { _id: "user:abc" } },
+        },
+      ],
+    ],
   });
 
   const ctx = sys.context({ subject: { id: "user:1" } });
