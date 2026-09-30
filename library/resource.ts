@@ -40,17 +40,24 @@ class ResourceImpl<T> implements Resource<T> {
   public readonly fetcher: (ctx: FetchCtx) => T | Promise<T>;
   public readonly activator?: (grant: Grant) => boolean;
   public readonly dedupKey?: (ctx: FetchCtx) => string;
+  public readonly batchFetcher?: (
+    ctxs: readonly FetchCtx[],
+  ) => readonly T[] | Promise<readonly T[]>;
 
   constructor(
     id: string,
     fetcher: (ctx: FetchCtx) => T | Promise<T>,
     activator?: (grant: Grant) => boolean,
     dedupKey?: (ctx: FetchCtx) => string,
+    batchFetcher?: (
+      ctxs: readonly FetchCtx[],
+    ) => readonly T[] | Promise<readonly T[]>,
   ) {
     this.id = id;
     this.fetcher = fetcher;
     this.activator = activator;
     this.dedupKey = dedupKey;
+    this.batchFetcher = batchFetcher;
   }
 
   isActiveFor(grant: Grant): boolean {
@@ -343,11 +350,15 @@ export function resource<T>(opts: {
   readonly fetch: (ctx: FetchCtx) => T | Promise<T>;
   readonly activeWhen?: (grant: Grant) => boolean;
   readonly dedupKey?: (ctx: FetchCtx) => string;
+  readonly fetchMany?: (
+    ctxs: readonly FetchCtx[],
+  ) => readonly T[] | Promise<readonly T[]>;
 }): Resource<T> {
   return new ResourceImpl<T>(
     opts.id,
     opts.fetch,
     opts.activeWhen,
     opts.dedupKey,
+    opts.fetchMany,
   );
 }

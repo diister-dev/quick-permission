@@ -120,6 +120,24 @@ type ProviderOutcome = {
 
 type GrantsCache = Map<Provider, Map<string, Promise<ProviderOutcome>>>;
 
+type PendingFetch = {
+  readonly ctx: FetchCtx;
+  readonly resolve: (value: unknown) => void;
+  readonly reject: (error: unknown) => void;
+};
+
+type PendingBatches = Map<Resource<unknown>, PendingFetch[]>;
+
+// Runs after the pending microtasks, so every `can()` resumed by the same
+// provider result has enqueued its fetch before the batch leaves.
+const scheduleFlush: (flush: () => void) => void =
+  typeof (globalThis as { setImmediate?: unknown }).setImmediate === "function"
+    ? (flush) =>
+        (
+          globalThis as unknown as { setImmediate: (fn: () => void) => void }
+        ).setImmediate(flush)
+    : (flush) => void setTimeout(flush, 0);
+
 function callHook(invoke: () => void): void {
   try {
     invoke();
@@ -632,6 +650,7 @@ export function createSystem<TMeta = unknown>(opts: {
       const cache = new Map<string, Promise<unknown>>();
       const grantsCache: GrantsCache = new Map();
       const fetchCounters = new Map<string, number>();
+      const pendingBatches: PendingBatches = new Map();
       const { subject, ...boundCtx } = bound;
       const resolveResource = (
         resourceOrId: Resource<unknown> | IndirectResource | string,
@@ -655,6 +674,7 @@ export function createSystem<TMeta = unknown>(opts: {
             cache,
             grantsCache,
             fetchCounters,
+            pendingBatches,
           });
         },
         preseed(resourceOrId, docs, opts) {
@@ -686,6 +706,7 @@ export function createSystem<TMeta = unknown>(opts: {
     readonly cache: Map<string, Promise<unknown>>;
     readonly grantsCache: GrantsCache;
     readonly fetchCounters: Map<string, number>;
+    readonly pendingBatches: PendingBatches;
   };
 
   function reportError(event: PermissionErrorEvent): void {
@@ -795,9 +816,50 @@ export function createSystem<TMeta = unknown>(opts: {
       resource.id,
       (state.fetchCounters.get(resource.id) ?? 0) + 1,
     );
-    const pending = Promise.resolve(resource.fetcher(ctx));
+    const pending = resource.batchFetcher
+      ? enqueueBatchedFetch(resource, ctx, state.pendingBatches)
+      : Promise.resolve(resource.fetcher(ctx));
     state.cache.set(key, pending);
     return pending;
+  }
+
+  function enqueueBatchedFetch(
+    resource: Resource<unknown>,
+    ctx: FetchCtx,
+    batches: PendingBatches,
+  ): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      let batch = batches.get(resource);
+      if (!batch) {
+        batch = [];
+        batches.set(resource, batch);
+        scheduleFlush(() => {
+          batches.delete(resource);
+          void flushBatch(resource, batch!);
+        });
+      }
+      batch.push({ ctx, resolve, reject });
+    });
+  }
+
+  async function flushBatch(
+    resource: Resource<unknown>,
+    batch: readonly PendingFetch[],
+  ): Promise<void> {
+    try {
+      const values = await resource.batchFetcher!(
+        batch.map((entry) => entry.ctx),
+      );
+      if (values.length !== batch.length) {
+        throw new Error(
+          `fetchMany of resource "${resource.id}" returned ${values.length} values for ${batch.length} targets`,
+        );
+      }
+      for (const [index, entry] of batch.entries())
+        entry.resolve(values[index]);
+    } catch (error) {
+      for (const entry of batch) entry.reject(error);
+    }
   }
 
   function validateArity(

@@ -91,6 +91,26 @@ const postOf = resource({
 });
 ```
 
+Add `fetchMany` when a page checks many targets at once. Inside a `context()`,
+fetches of the resource started in the same tick are coalesced into a single
+call, so a batch of 100 `can()` over 100 posts reads the database once. The
+result must be aligned with `ctxs` by index; a throw denies every check of
+the batch. Without a context, `fetch` is used.
+
+```ts
+const postOf = resource({
+  id: "post",
+  fetch: ({ target }) => db.posts.findOne({ _id: target[0] }),
+  fetchMany: async (ctxs) => {
+    const ids = ctxs.map(({ target }) => target[0]);
+    const posts = await db.posts.find({ _id: { $in: ids } }).toArray();
+    const byId = new Map(posts.map((post) => [post._id, post]));
+    return ids.map((id) => byId.get(id) ?? null);
+  },
+  dedupKey: ({ target }) => String(target[0]),
+});
+```
+
 ### Rules
 
 Rules are what a permission checks. Every resource carries sugar methods for the

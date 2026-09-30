@@ -214,6 +214,14 @@ export interface Resource<T> {
   readonly id: string;
   /** Fetch la donnée à partir du contexte (subject, target, grant). */
   readonly fetcher: (ctx: FetchCtx) => T | Promise<T>;
+  /**
+   * Optional bulk loader. Within a context, fetches of this resource started
+   * in the same tick are coalesced into one call, whose result is aligned
+   * with `ctxs` by index.
+   */
+  readonly batchFetcher?: (
+    ctxs: readonly FetchCtx[],
+  ) => readonly T[] | Promise<readonly T[]>;
   /** Si défini, la resource est skip si l'activator retourne false. */
   readonly activator?: (grant: Grant) => boolean;
   /**
