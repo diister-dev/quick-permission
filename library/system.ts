@@ -664,7 +664,8 @@ export function createSystem<TMeta = unknown>(opts: {
     key: string,
     target: readonly unknown[] | undefined,
   ): Promise<ProviderOutcome> {
-    const started = performance.now();
+    const onFetch = hooks.onProviderFetch;
+    const started = onFetch ? performance.now() : 0;
     let grants: readonly Grant[];
     try {
       grants =
@@ -685,9 +686,10 @@ export function createSystem<TMeta = unknown>(opts: {
         failure: `provider ${name} failed: ${describeError(error)}`,
       };
     }
+    if (!onFetch) return { grants };
     const durationMs = performance.now() - started;
     callHook(() =>
-      hooks.onProviderFetch?.({
+      onFetch({
         provider: name,
         subject,
         key,
@@ -707,10 +709,6 @@ export function createSystem<TMeta = unknown>(opts: {
     state: ContextState | undefined,
   ): Promise<ProviderOutcome> {
     const name = providerNames.get(provider) ?? "provider";
-    if (typeof provider === "object") {
-      if (!providerHandlesKey(provider, key)) return { grants: [] };
-      if (!providerHandlesTarget(provider, target)) return { grants: [] };
-    }
     let ck: string | undefined;
     try {
       ck =
@@ -804,16 +802,22 @@ export function createSystem<TMeta = unknown>(opts: {
     const arityErr = validateArity(perm, target);
     if (arityErr) return { ok: false, reasons: [arityErr] };
 
+    const consulted: Provider[] = [];
+    for (const provider of providers) {
+      if (typeof provider === "object") {
+        if (!providerHandlesKey(provider, key)) continue;
+        if (!providerHandlesTarget(provider, target)) continue;
+      }
+      consulted.push(provider);
+    }
+    const outcomes = await Promise.all(
+      consulted.map((provider) =>
+        invokeProvider(provider, subject, key, target, state),
+      ),
+    );
     const allGrants: Grant[] = [];
     const failures: string[] = [];
-    for (const provider of providers) {
-      const outcome = await invokeProvider(
-        provider,
-        subject,
-        key,
-        target,
-        state,
-      );
+    for (const outcome of outcomes) {
       allGrants.push(...outcome.grants);
       if (outcome.failure) failures.push(outcome.failure);
     }
