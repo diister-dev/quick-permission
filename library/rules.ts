@@ -14,7 +14,7 @@ import type {
   Rule,
   RuleResult,
 } from "./types.ts";
-import { evaluateSpec, validateSpec } from "./mongo-query.ts";
+import { compileSpec } from "./mongo-query.ts";
 
 export type DefineRuleOpts<RS extends readonly Resource<unknown>[], P> = {
   /** Identifiant de famille de rule (matrix UI). */
@@ -194,8 +194,7 @@ export function inputMatch(): Rule {
       if (ctx.input === undefined) {
         return { ok: false, reason: "input-match: input required" };
       }
-      validateSpec(spec);
-      return evaluateSpec(spec as Record<string, unknown>, ctx.input)
+      return compileSpec(spec)(ctx.input)
         ? { ok: true }
         : { ok: false, reason: "input-match: mismatch" };
     },

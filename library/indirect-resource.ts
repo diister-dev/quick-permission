@@ -20,7 +20,7 @@
  */
 
 import { defineRule } from "./rules.ts";
-import { evaluateSpec, validateSpec } from "./mongo-query.ts";
+import { prepareSpec } from "./mongo-query.ts";
 import type { FetchCtx, Rule } from "./types.ts";
 
 /**
@@ -169,7 +169,7 @@ export function indirectResource(spec: IndirectResourceSpec): IndirectResource {
           // indirect resource without further check).
           const spec = ctx.grant.with?.[impl.id];
           if (spec === undefined) return { ok: true };
-          if (typeof spec === "object" && spec !== null) validateSpec(spec);
+          const tester = prepareSpec(spec);
 
           const joined =
             (
@@ -177,9 +177,7 @@ export function indirectResource(spec: IndirectResourceSpec): IndirectResource {
                 _indirectFetched?: Map<string, readonly unknown[]>;
               }
             )._indirectFetched?.get(impl.id) ?? [];
-          const passes = joined.some((d) =>
-            evaluateSpec(spec as Record<string, unknown>, d),
-          );
+          const passes = joined.some((d) => tester()(d));
           return passes
             ? { ok: true }
             : {
