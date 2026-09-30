@@ -1,9 +1,0 @@
-{
-  "tasks": {
-    "test": "deno test library/",
-    "fmt": "deno fmt"
-  },
-  "imports": {
-    "jsr:@std/": "https://deno.land/std@0.208.0/"
-  }
-}

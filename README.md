@@ -1,325 +1,320 @@
-# Quick Permission
+# @diister/quick-permission
 
-[![JSR Latest](https://img.shields.io/jsr/v/@diister/quick-permission)](https://jsr.io/@diister/quick-permission)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+Declarative, type-safe permissions that answer three questions at once: **may
+this subject act?**, **on which rows?**, and **which fields come back?**
 
-A flexible and type-safe permission system for TypeScript/JavaScript
-applications.
+A check returns not just a yes or no, but the MongoDB constraints — and, when a
+rule reaches across collections, the aggregation pipeline — needed to enforce
+the same decision on a list query.
 
-## Table of Contents
+[![npm](https://img.shields.io/npm/v/@diister/quick-permission)](https://www.npmjs.com/package/@diister/quick-permission)
+[![JSR](https://jsr.io/badges/@diister/quick-permission)](https://jsr.io/@diister/quick-permission)
+[![License](https://img.shields.io/github/license/diister-dev/quick-permission)](LICENSE)
 
-- [Introduction](#introduction)
-- [Installation](#installation)
-- [Core Concepts](#core-concepts)
-- [Basic Usage](#basic-usage)
-- [Advanced Usage](#advanced-usage)
-- [API Reference](#api-reference)
-- [Performance](#performance)
-- [Contributing](#contributing)
-- [License](#license)
-
-## Introduction
-
-Quick Permission is a TypeScript library that provides a flexible, hierarchical
-permission system with strong type safety. It allows you to define complex
-permission rules that can be composed together and validated against multiple
-permission sources.
-
-### Key Features
-
-- **Hierarchical Structure**: Organize permissions in an intuitive tree
-  structure
-- **Strong Type Safety**: Full TypeScript support for permission requests and
-  states
-- **Rule Composition**: Combine rules with AND, OR, and NOT operators
-- **Multiple Permission Sources**: Validate against multiple state sources
-  simultaneously
-- **Performance Focused**: Optimized for efficient validation in large
-  applications
+Runs on Bun, Node.js 20.11+ and Deno. No runtime dependencies.
 
 ## Installation
 
 ```bash
-# Install via JSR
-npx jsr add @diister/quick-permission
+# Bun / npm / pnpm / yarn
+bun add @diister/quick-permission
+
+# Deno
+deno add jsr:@diister/quick-permission
 ```
 
-## Core Concepts
+## Quick start
 
-### Permission Structure
+A **resource** says how to load a document. A **permission** says what target it
+takes and which rules must hold. A **provider** says which grants a subject
+carries.
 
-A permission system in Quick Permission consists of three key components:
+```ts
+import {
+  createSystem,
+  permission,
+  resource,
+  target,
+} from "@diister/quick-permission";
 
-1. **Hierarchy**: A tree structure of permissions organized in parent-child
-   relationships
-2. **Rules**: Functions that determine if a permission is granted based on state
-   and request
-3. **Schemas**: Definitions of the structure and validation of state and request
-   data
-
-### Rules and Validation
-
-Rules evaluate permission requests against permission states and can return:
-
-- `true`: Explicitly grants permission
-- `false`: Explicitly denies permission (short-circuits validation)
-- `undefined`: No opinion (neutral)
-
-The validation logic combines these results to determine if access is granted.
-
-### States Array
-
-The system can check permissions against multiple state sources at once:
-
-```typescript
-const states = [
-  {
-    // States from direct user grants
-    "resource.view": { target: ["resource:A", "resource:B"] },
-  },
-  {
-    // States from user's group membership
-    "resource.view": { target: ["resource:C", "resource:D"] },
-  },
-];
-```
-
-Permission is granted if ANY state source allows the request (OR logic).
-
-## Basic Usage
-
-Here's a simple example implementing file system permissions:
-
-```typescript
-import { hierarchy, permission, validate } from "@diister/quick-permission";
-import { allowTarget } from "@diister/quick-permission/rules/allowTarget";
-import { allowOwner } from "@diister/quick-permission/rules/allowOwner";
-
-// Create a permission hierarchy
-const filePermissions = hierarchy({
-  files: permission({
-    rules: [allowTarget({ wildcards: true })],
-    children: {
-      read: permission({
-        rules: [allowTarget()],
-      }),
-      write: permission({
-        rules: [allowOwner()],
-      }),
-    },
-  }),
+const userOf = resource({
+  id: "user",
+  fetch: ({ target }) => db.users.findOne({ _id: target[0] }),
 });
 
-// Define permission states
-const states = [
-  {
-    "files.read": { target: ["file:public/*", "file:user/123/*"] },
-    "files.write": { target: ["file:user/123/*"] },
+const sys = createSystem({
+  schema: {
+    "users.read": permission({ target: target.required("user") })
+      .rules([userOf.match()]),
   },
-];
-
-// Check a permission request
-const request = {
-  from: "user:123",
-  target: "file:public/document.txt",
-};
-
-const result = validate(filePermissions, states, "files.read", request);
-console.log(result.allowed); // true
-```
-
-## Advanced Usage
-
-### Built-in Rules
-
-Quick Permission provides several built-in rules that can be composed together:
-
-- `allowSelf()`: Grants permission when the requester and target are the same
-- `allowOwner()`: Grants permission when the requester is the resource owner
-- `allowTarget()`: Grants permission based on target patterns
-- `denySelf()`: Denies permission when requester and target are the same
-- `ensureTime()`: Validates time-based permissions
-
-### Creating Custom Schemas and Rules
-
-Quick Permission provides utility functions to easily create custom schemas and
-rules:
-
-```typescript
-import { rule, schema } from "@diister/quick-permission";
-
-// Define types for your custom schema
-type BlogState = {
-  authorId: string;
-  published: boolean;
-};
-
-type BlogRequest = {
-  from: string;
-  action: "read" | "edit";
-};
-
-// Create a custom schema using the schema utility
-const blogSchema = () =>
-  schema<BlogState, BlogRequest>({
-    name: "blog",
-    state(obj: unknown): obj is BlogState {
-      if (typeof obj !== "object" || !obj) return false;
-      const state = obj as BlogState;
-      return typeof state.authorId === "string" &&
-        typeof state.published === "boolean";
-    },
-    request(obj: unknown): obj is BlogRequest {
-      if (typeof obj !== "object" || !obj) return false;
-      const req = obj as BlogRequest;
-      return typeof req.from === "string" &&
-        (req.action === "read" || req.action === "edit");
-    },
-    defaultState(): BlogState {
-      return { authorId: "", published: false };
-    },
-  });
-
-// Create a custom rule using the rule utility
-const allowBlogAccess = () =>
-  rule(
-    "allowBlogAccess",
-    [blogSchema()],
-    (state, request) => {
-      // Anyone can read published posts
-      if (request.action === "read" && state.published) {
-        return "granted";
-      }
-      // Only author can edit
-      if (request.action === "edit" && request.from === state.authorId) {
-        return "granted";
-      }
-      return "neutral";
-    },
-  );
-
-// Use your custom rule in a permission
-const blogPermission = permission({
-  rules: [allowBlogAccess()],
-});
-```
-
-### Rule Composition
-
-You can compose rules using logical operators:
-
-```typescript
-import { and, not, or } from "@diister/quick-permission/operators";
-
-const complexPermission = permission({
-  rules: [
-    and([
-      allowTarget(),
-      or([
-        allowOwner(),
-        not(denySelf()),
-      ]),
-    ]),
+  providers: [
+    (subject) => grantsFor(subject), // [{ key: "users.read", target: ["user:abc"] }]
   ],
 });
+
+const result = await sys
+  .context({ subject: { id: "user:caller" } })
+  .can("users.read", ["user:abc"]);
+
+result.ok; // true
 ```
 
-### Default States
+## Core concepts
 
-For rules that need state context to function, you can define default states:
+### Targets
 
-```typescript
-const articlePermission = permission({
-  rules: [allowOwner()],
-  defaultState: { owner: null }, // Minimal required state
+A permission declares the shape of what it acts on. Targets are segment tuples,
+so `["user:abc"]` and `["org:1", "project:2"]` are both valid — for their
+respective declarations.
+
+```ts
+target.required("user")        // exactly one user segment
+target.optional("user")        // the segment may be omitted
+target.none()                  // the permission acts on nothing in particular
+target.path("org", "project")  // a hierarchy
+```
+
+Grants may use `*` as a segment wildcard: a grant on `["user:*"]` matches any
+user.
+
+### Resources
+
+A resource is a named loader. The engine calls `fetch` at most once per distinct
+target within a check, and `dedupKey` lets you widen or narrow that sharing.
+
+```ts
+const postOf = resource({
+  id: "post",
+  fetch: ({ subject, target, grant }) => db.posts.findOne({ _id: target[0] }),
+  activeWhen: (grant) => grant.with?.post !== undefined, // skip when irrelevant
+  dedupKey: ({ target }) => String(target[0]),
 });
-
-// The validate function automatically applies the default state
-// when no explicit state is provided
 ```
 
-### Hierarchical Resolution
+Add `fetchMany` when a page checks many targets at once. Inside a `context()`,
+fetches of the resource started in the same tick are coalesced into a single
+call, so a batch of 100 `can()` over 100 posts reads the database once. The
+result must be aligned with `ctxs` by index; a throw denies every check of
+the batch. Without a context, `fetch` is used.
 
-When a specific permission state is missing, the system will check parent
-permissions:
-
-```typescript
-const hierarchy = {
-  "user": {
-    "content": {
-      "edit": {/* specific rules */},
-    },
+```ts
+const postOf = resource({
+  id: "post",
+  fetch: ({ target }) => db.posts.findOne({ _id: target[0] }),
+  fetchMany: async (ctxs) => {
+    const ids = ctxs.map(({ target }) => target[0]);
+    const posts = await db.posts.find({ _id: { $in: ids } }).toArray();
+    const byId = new Map(posts.map((post) => [post._id, post]));
+    return ids.map((id) => byId.get(id) ?? null);
   },
-};
-
-// If "user.content.edit" state is missing, the system will check "user.content"
-// This allows for inheritance of permissions from parents to children
+  dedupKey: ({ target }) => String(target[0]),
+});
 ```
 
-## API Reference
+### Rules
 
-### Core Functions
+Rules are what a permission checks. Every resource carries sugar methods for the
+common ones:
 
-- `hierarchy(config)`: Creates a permission hierarchy
-- `permission(options)`: Creates a permission node
-- `validate(hierarchy, states, permissionKey, request)`: Validates a permission
-- `schema(options)`: Creates a custom schema with type safety
-- `rule(name, schemas, checkFn)`: Creates a custom rule
+| Method | Holds when |
+| --- | --- |
+| `match(extract?)` | the fetched value equals the grant's constraint |
+| `filter(extract?)` | contributes a field filter rather than a verdict |
+| `includes(field, extract)` | the grant's `field` is in the extracted list |
+| `requireTruthy()` | the document exists and is truthy |
+| `requireOwner(get, { flag })` | the subject owns the document |
+| `requireMembership(get, { flag })` | the subject is in the extracted list |
+| `requireCustom(predicate, opts)` | your own predicate holds |
 
-### Built-in Rules
+For anything else, `defineRule` is the primitive they are all built on:
 
-```typescript
-// Identity and ownership
-allowSelf(); // Checks if request.from === request.target
-allowOwner(); // Checks if request.from === request.owner
-denySelf(); // Inverse of allowSelf()
+```ts
+import { defineRule } from "@diister/quick-permission";
 
-// Target-based permissions
-allowTarget({ wildcards: true }); // Pattern matching for targets
-
-// Time-based permissions
-ensureTime(); // Validates time constraints
+const isPublished = defineRule({
+  kind: "post.published",
+  needs: [postOf],
+  check: ([post]) =>
+    post?.status === "published"
+      ? true
+      : { ok: false, reason: "post is not published" },
+});
 ```
 
-### Logical Operators
+`check` returns a boolean for a plain verdict, or `{ ok: false, reason }` when
+the caller deserves to know why.
 
-```typescript
-and([rule1, rule2]); // All rules must return true
-or([rule1, rule2]); // At least one rule must return true
-not(rule); // Inverts the result of a rule
+`match()` reads its resource only for a grant that carries a spec under the
+resource id; a grant without one passes without a read. A custom rule gets the
+same behaviour with `fetchWhen: (grant) => boolean`: the rule still runs, and
+its data is `undefined` when nothing was read.
+
+### Providers
+
+A provider turns a subject into grants. Several may be combined, and a subject
+is allowed when any single grant satisfies the permission's rules. A grant names
+one permission key; there is no wildcard key, so an administrator is granted the
+intermediate keys that expand to everything they hold.
+
+Providers are called concurrently; their grants and failures keep the order in
+which the providers are declared.
+A context expands a cached provider result once and reuses it, so an
+intermediate's `expandsTo` must depend on nothing but the grant it receives.
+
+```ts
+providers: [
+  (subject) => db.grants.find({ userId: subject.id }).toArray(),
+  (subject) =>
+    subject.isAdmin ? [{ key: "posts.manage", target: ["post:*"] }] : [],
+]
 ```
 
-## Performance
+A provider can also be an object, which lets the engine skip it and cache it:
 
-Quick Permission is optimized for performance:
+```ts
+{
+  name: "memberships",
+  keys: ["posts.manage"],
+  targetType: "post",
+  cacheKey: (subject) => subject.id,
+  fetch: (subject, key, target) => membershipGrants(subject.id, target?.[0]),
+}
+```
 
-- **Hierarchical Structure**: Deeper hierarchies perform better than wide ones
-- **Multiple State Sources**: Efficiently scales with many state sources
-- **Rule Short-Circuiting**: Validation stops when a rule returns false
+| Field | Effect |
+| --- | --- |
+| `name` | how the provider is named in hooks and in the reasons of a deny |
+| `keys`, `matches` | the keys the provider emits; it is consulted for those and for every key they expand to |
+| `targetType` | consulted only when `target[0]` is one concrete id of that type (`"post:1"`, never `"post:*"`) |
+| `cacheKey` | grants are reused within a `context()` for the same key; return `undefined` to skip the cache |
+| `fetch` | returns the grants |
 
-Performance tips:
+A provider that throws, or whose `cacheKey` throws, contributes no grant. The
+check goes on with the others, so a failure can only narrow what a subject may
+do. The failure reaches `hooks.onError` and, when the check is denied, its
+`reasons`. A resource or rule that throws rejects only the grant that needed it,
+the same way.
 
-1. Place the most restrictive rules first in your rule array
-2. Define explicit states for permissions that will be checked
-3. Use default states for common validation patterns
+## Filtering lists, not just single documents
 
-## Contributing
+This is what the library is really for. `can()` hands back the query fragments
+needed to apply the same decision to a list.
 
-Contributions are welcome! Please follow these guidelines:
+```ts
+const result = await sys.context({ subject }).can("posts.list");
+if (!result.ok) return [];
 
-1. Follow TypeScript best practices and maintain type safety
-2. Add tests for new features or bug fixes
-3. Update documentation to reflect changes
-4. Run the test suite to verify your changes
+const rows = result.stages
+  ? await db.posts.aggregate([...result.stages]).toArray()
+  : await db.posts.find(result.constraints ?? {}).toArray();
+```
+
+`constraints` is a plain MongoDB filter. `stages` appears instead when a rule
+reaches through an **indirect resource** — a join the engine has to express as
+an aggregation, because the deciding data lives in another collection.
+
+```ts
+import { indirectResource } from "@diister/quick-permission";
+
+const membershipsOf = indirectResource({
+  id: "memberships_of_participant",
+  from: participantOf,
+  on: { localField: "_id", foreignField: "participantId" },
+  to: { _type: "org_membership" },
+  cardinality: "many",
+});
+```
+
+Field-level filtering works the same way: `filter()` rules contribute a
+`FilterSpec`, and `applyFilter` applies it to a document.
+
+```ts
+import { applyFilter } from "@diister/quick-permission";
+
+const visible = applyFilter(post, result.data as FilterSpec);
+```
+
+## API reference
+
+### `createSystem({ schema, providers, hooks })`
+
+Builds the engine. `schema` maps permission keys to `permission(...)`
+declarations; `providers` lists the grant sources; `hooks` observes them:
+
+| Hook | Called with |
+| --- | --- |
+| `onProviderFetch` | provider name, key, target, `durationMs`, `grantCount`, for every fetch that was not served from the cache |
+| `onError` | `{ source: "provider", provider, error, … }` or `{ source: "rule", grantId, error, … }` |
+
+A hook that throws never changes a decision. `createSystem` returns a `System`:
+
+| Member | Purpose |
+| --- | --- |
+| `context({ subject })` | bind a subject; returns the surface below |
+| `can(key, target?)` | one-shot check without binding a context |
+| `list()` | every permission key with its metadata |
+| `tree()` | the same, as a hierarchy |
+| `schema` | the declaration you passed in |
+| `indirectResources()` | every indirect resource reachable from the schema |
+| `indirectsUsedBy(key)` | those a given permission depends on |
+
+### `context({ subject })`
+
+| Member | Purpose |
+| --- | --- |
+| `can(key, target?)` | run a check; resource fetches are deduplicated across it |
+| `preseed(resourceOrId, target, value)` | supply a document you already hold |
+| `getFetchCounters()` | how many times each resource was fetched |
+| `clearCounters()` | reset those counters |
+| `dumpGrants()` | the grants the providers returned, for debugging |
+
+`preseed` is worth knowing: when the caller already has the document in hand,
+seeding it skips the fetch entirely.
+
+### The result of `can()`
+
+```ts
+type CanResult =
+  | {
+      ok: true;
+      data?: unknown;                              // filter spec, when filter() rules ran
+      constraints?: Record<string, unknown>;       // MongoDB filter for list queries
+      stages?: readonly Record<string, unknown>[]; // aggregation, for indirect rules
+      matchedGrants?: readonly string[];
+    }
+  | { ok: false /* … */ };
+```
+
+### Other exports
+
+`permission`, `resource`, `defineRule`, `indirectResource`, `target`, `seg`,
+`applyFilter`, `inputMatch`, `intermediate`, `matchPath`, `pickFields`,
+`requireSelf`, and the types they use.
+
+`isCapabilityQuery(target)`, `isWildcardSegment(segment)` and
+`refType(segment)` expose how the engine reads a target: a query with any
+wildcard segment (`"*"` or `"post:*"`) is a capability query, and `refType`
+returns the type of a `"type:id"` segment.
+
+## Development
 
 ```bash
-# Run tests
-deno test
-
-# Run benchmarks to verify performance impact
-deno bench library/test/benchmarks/validation_benchmark.ts --no-check
+bun install
+bun test          # 198 tests
+bun run check     # tsc
+bun run lint      # biome
+bun run build     # dist/ for npm
 ```
+
+The suite targets `node:test`, so it runs unchanged under `bun test`,
+`node --test` and `deno test` — worth it, because Bun runs JavaScriptCore while
+Node and Deno run V8. Five cases need a MongoDB on `localhost:27017`; set
+`MONGO_URL` to point elsewhere.
+
+`sift/` is vendored from [sift.js](https://github.com/crcn/sift.js) (MIT) with
+the `$where` operator removed, and is excluded from lint and formatting so
+re-vendoring stays a clean diff.
 
 ## License
 
-MIT License
+MIT — see [LICENSE](LICENSE).

@@ -1,93 +1,89 @@
 /**
- * Quick Permission Library
+ * `@diister/quick-permission` — API publique.
  *
- * A flexible and type-safe permission system for TypeScript/JavaScript applications.
+ * Expose une primitive unique `defineRule({ needs, check })` autour de
+ * laquelle sont organisés les `Resource`, méthodes de sucre, et le moteur
+ * d'orchestration avec dedup par contexte.
  *
- * This library provides a hierarchical permission system with strong type safety, allowing
- * you to define complex permission rules that can be composed together and validated
- * against multiple permission sources.
- *
- * ## Key Features
- *
- * - **Hierarchical Structure**: Organize permissions in an intuitive tree structure
- * - **Strong Type Safety**: Full TypeScript support for permission requests and states
- * - **Rule Composition**: Combine rules with AND, OR, and NOT operators
- * - **Multiple Permission Sources**: Validate against multiple state sources simultaneously
- * - **Performance Focused**: Optimized for efficient validation in large applications
- *
- * ## Basic Usage
- *
- * ```typescript
- * import { hierarchy, permission, validate } from "@diister/quick-permission";
- * import { allowTarget } from "@diister/quick-permission/rules/allowTarget";
- * import { allowOwner } from "@diister/quick-permission/rules/allowOwner";
- *
- * // Create a permission hierarchy
- * const filePermissions = hierarchy({
- *   files: permission({
- *     rules: [allowTarget({ wildcards: true })],
- *     children: {
- *       read: permission({
- *         rules: [allowTarget()],
- *       }),
- *       write: permission({
- *         rules: [allowOwner()],
- *       }),
- *     },
- *   }),
- * });
- *
- * // Define permission states
- * const states = [
- *   {
- *     "files.read": { target: ["file:public/*", "file:user/123/*"] },
- *     "files.write": { target: ["file:user/123/*"] },
- *   },
- * ];
- *
- * // Check a permission request
- * const result = validate(filePermissions, states, "files.read", {
- *   from: "user:123",
- *   target: "file:public/document.txt",
- * });
- *
- * console.log(result.allowed); // true
- * ```
- *
- * @module
+ * Cf. `docs/rfc-resource-pipe-api.md` pour la motivation, les décisions
+ * de design et le plan de migration.
  */
 
-// Re-export core components
-export { hierarchy, permission, validate } from "./core/permission.ts";
-export { createDefaultStateSet, satisfiedBy } from "./core/hierarchy.ts";
-export { rule } from "./core/rule.ts";
-export { schema } from "./core/schema.ts";
+// ─── Targets ─────────────────────────────────────────────────────────────
+export { seg, target } from "./target.ts";
 
-// Re-export operators
-export { and, merge, not, or } from "./operators/operations.ts";
-
-// Re-export rules
-export { allowOwner } from "./rules/allowOwner/allowOwner.ts";
-export { allowSelf } from "./rules/allowSelf/allowSelf.ts";
-export { allowTarget } from "./rules/allowTarget/allowTarget.ts";
-export { denySelf } from "./rules/denySelf/denySelf.ts";
-export { ensureTime } from "./rules/ensureTime/ensureTime.ts";
-
-// Re-export schemas
-export { owner } from "./schemas/owner/owner.ts";
-export { target } from "./schemas/target/target.ts";
-export { time } from "./schemas/time/time.ts";
-
-// Re-export types
+// ─── Core types ──────────────────────────────────────────────────────────
 export type {
-  Hierarchy,
+  AnySegment,
+  AnyTarget,
+  CanResult,
+  FetchCtx,
+  FilterContribution,
+  Grant,
+  IndirectResourceInfo,
+  ListEntry,
   Permission,
-  PermissionHierarchy,
-  PermissionKey,
-  PermissionRequests,
-  PermissionStateSet,
-  ValidationError,
-  ValidationResult,
-} from "./types/common.ts";
-export type { Rule } from "./types/rule.ts";
-export type { Schema } from "./types/schema.ts";
+  Resource,
+  ResourceData,
+  ResourcesData,
+  Rule,
+  RuleDescriptor,
+  RuleResult,
+  SegmentSpec,
+  SerializableSegment,
+  SerializableTarget,
+  SpecToSegment,
+  Subject,
+  TargetArgs,
+  TargetNone,
+  TargetOptional,
+  TargetPath,
+  TargetRequired,
+  TreeNode,
+} from "./types.ts";
+
+// ─── Resource factory + sugar methods ────────────────────────────────────
+export { resource } from "./resource.ts";
+
+// ─── Indirect resource (JOIN-based, generates aggregation pipeline) ──────
+export { indirectResource } from "./indirect-resource.ts";
+export type {
+  IndirectResource,
+  IndirectResourceJoin,
+} from "./indirect-resource.ts";
+export type { AggregationStage } from "./indirect-aggregation.ts";
+
+// ─── defineRule + standalone helpers ─────────────────────────────────────
+export { defineRule, inputMatch, matchPath, requireSelf } from "./rules.ts";
+export type { DefineRuleOpts } from "./rules.ts";
+
+// ─── Permission builders ─────────────────────────────────────────────────
+export { intermediate, permission } from "./permission.ts";
+export type {
+  IntermediateBuilder,
+  IntermediateConfig,
+  PermissionBuilder,
+  PermissionConfig,
+} from "./permission.ts";
+
+// ─── System ──────────────────────────────────────────────────────────────
+export {
+  createSystem,
+  isCapabilityQuery,
+  isWildcardSegment,
+  refType,
+} from "./system.ts";
+export type {
+  CanContext,
+  PermissionErrorEvent,
+  Provider,
+  ProviderFetchEvent,
+  ProviderFn,
+  ProviderObject,
+  System,
+  SystemHooks,
+} from "./system.ts";
+
+// ─── Field-projection helpers (used outside permission checks too) ───────
+export { applyFilter, pickFields } from "./core/filtering.ts";
+export type { FilterSpec } from "./core/merging.ts";
