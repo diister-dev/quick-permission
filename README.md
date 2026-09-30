@@ -124,12 +124,22 @@ const isPublished = defineRule({
 `check` returns a boolean for a plain verdict, or `{ ok: false, reason }` when
 the caller deserves to know why.
 
+`match()` reads its resource only for a grant that carries a spec under the
+resource id; a grant without one passes without a read. A custom rule gets the
+same behaviour with `fetchWhen: (grant) => boolean`: the rule still runs, and
+its data is `undefined` when nothing was read.
+
 ### Providers
 
 A provider turns a subject into grants. Several may be combined, and a subject
 is allowed when any single grant satisfies the permission's rules. A grant names
 one permission key; there is no wildcard key, so an administrator is granted the
 intermediate keys that expand to everything they hold.
+
+Providers are called concurrently; their grants and failures keep the order in
+which the providers are declared.
+A context expands a cached provider result once and reuses it, so an
+intermediate's `expandsTo` must depend on nothing but the grant it receives.
 
 ```ts
 providers: [
