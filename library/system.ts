@@ -267,18 +267,18 @@ function targetMatches(
   });
 }
 
-function expandGrants<TMeta>(
+type ExpandedGrant = { readonly grant: Grant; readonly depth: number };
+
+function expandGrantsByKey<TMeta>(
   grants: readonly Grant[],
   schema: Readonly<Record<string, Permission<TMeta>>>,
   maxDepth = 10,
-): Grant[] {
-  const out: Grant[] = [];
-  const queue: Array<{ grant: Grant; depth: number }> = grants.map((g) => ({
-    grant: g,
-    depth: 0,
-  }));
+): Map<string, ExpandedGrant[]> {
+  const byKey = new Map<string, ExpandedGrant[]>();
+  const queue: ExpandedGrant[] = grants.map((g) => ({ grant: g, depth: 0 }));
   for (let head = 0; head < queue.length; head++) {
-    const { grant, depth } = queue[head];
+    const entry = queue[head];
+    const { grant, depth } = entry;
     const perm = schema[grant.key];
     if (
       perm &&
@@ -287,7 +287,9 @@ function expandGrants<TMeta>(
     ) {
       continue;
     }
-    out.push(grant);
+    const list = byKey.get(grant.key);
+    if (list) list.push(entry);
+    else byKey.set(grant.key, [entry]);
     if (depth >= maxDepth) continue;
     if (perm?.expandsTo) {
       const children = perm.expandsTo(grant);
@@ -296,7 +298,22 @@ function expandGrants<TMeta>(
       }
     }
   }
-  return out;
+  return byKey;
+}
+
+// Expanding providers one by one and interleaving by depth reproduces the
+// breadth-first order of expanding their concatenation.
+function mergeByDepth(
+  lists: readonly (readonly ExpandedGrant[])[],
+): readonly ExpandedGrant[] {
+  if (lists.length === 1) return lists[0];
+  return lists.flat().sort((a, b) => a.depth - b.depth);
+}
+
+function sameGrants(a: readonly Grant[], b: readonly Grant[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 
 function serializeSegment(s: {
@@ -510,6 +527,24 @@ export function createSystem<TMeta = unknown>(opts: {
       const ir = extractIndirectResource(rule);
       if (ir && !resourceRegistry.has(ir.id)) resourceRegistry.set(ir.id, ir);
     }
+  }
+
+  const expansions = new WeakMap<
+    ProviderOutcome,
+    {
+      readonly source: readonly Grant[];
+      readonly byKey: Map<string, ExpandedGrant[]>;
+    }
+  >();
+
+  function expansionOf(
+    outcome: ProviderOutcome,
+  ): ReadonlyMap<string, readonly ExpandedGrant[]> {
+    const known = expansions.get(outcome);
+    if (known && sameGrants(known.source, outcome.grants)) return known.byKey;
+    const byKey = expandGrantsByKey(outcome.grants, schema);
+    expansions.set(outcome, { source: [...outcome.grants], byKey });
+    return byKey;
   }
 
   type PermissionPlan = {
@@ -815,21 +850,27 @@ export function createSystem<TMeta = unknown>(opts: {
         invokeProvider(provider, subject, key, target, state),
       ),
     );
-    const allGrants: Grant[] = [];
     const failures: string[] = [];
     for (const outcome of outcomes) {
-      allGrants.push(...outcome.grants);
       if (outcome.failure) failures.push(outcome.failure);
     }
 
-    const expanded = expandGrants(allGrants, schema);
+    const forKey: (readonly ExpandedGrant[])[] = [];
+    for (const outcome of outcomes) {
+      if (outcome.grants.length === 0) continue;
+      const list = expansionOf(outcome).get(key);
+      if (list) forKey.push(list);
+    }
 
     const capability = isCapabilityQuery(target);
-    const matching = expanded.filter(
-      (g) =>
-        g.key === key &&
-        targetMatches(g.target, target, perm.target.kind, capability),
-    );
+    const matching: Grant[] = [];
+    if (forKey.length > 0) {
+      for (const { grant } of mergeByDepth(forKey)) {
+        if (targetMatches(grant.target, target, perm.target.kind, capability)) {
+          matching.push(grant);
+        }
+      }
+    }
     if (matching.length === 0) {
       return { ok: false, reasons: ["no matching grant", ...failures] };
     }

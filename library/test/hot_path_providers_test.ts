@@ -88,3 +88,64 @@ test("a throwing key matcher still rejects the check", async () => {
   });
   await assertRejects(() => sys.can(subject, "posts.read", ["post:1"]));
 });
+
+test("a cached provider result is expanded once per context", async () => {
+  let expansions = 0;
+  let fetches = 0;
+  const sys = createSystem({
+    schema: {
+      "posts.read": permission({ target: target.required("post") }).rules([]),
+      "posts.manage": intermediate({
+        target: target.required("post"),
+        expandsTo: (g: Grant) => {
+          expansions++;
+          return [{ ...g, key: "posts.read" }];
+        },
+      }).rules([]),
+    },
+    providers: [
+      {
+        cacheKey: () => "all",
+        fetch: () => {
+          fetches++;
+          return [{ id: "m", key: "posts.manage", target: ["post:*"] }];
+        },
+      },
+    ],
+  });
+  const ctx = sys.context({ subject });
+  const baseline = expansions;
+  for (let i = 0; i < 20; i++) {
+    assertEquals((await ctx.can("posts.read", [`post:${i}`])).ok, true);
+    assertEquals((await ctx.can("posts.manage", [`post:${i}`])).ok, true);
+  }
+  assertEquals(fetches, 1);
+  assertEquals(expansions - baseline, 1);
+
+  const other = sys.context({ subject });
+  await other.can("posts.read", ["post:1"]);
+  assertEquals(fetches, 2);
+  assertEquals(expansions - baseline, 2);
+});
+
+test("a cached array that grows in place is expanded again", async () => {
+  const grants: Grant[] = [
+    { id: "first", key: "posts.read", target: ["post:1"] },
+  ];
+  const sys = createSystem({
+    schema,
+    providers: [{ cacheKey: () => "all", fetch: () => grants }],
+  });
+  const ctx = sys.context({ subject });
+  assertEquals((await ctx.can("posts.read", ["post:2"])).ok, false);
+  grants.push({ id: "second", key: "posts.manage", target: ["post:2"] });
+  assertEquals(await ctx.can("posts.read", ["post:2"]), {
+    ok: true,
+    matchedGrants: ["second"],
+  });
+  grants[0] = { id: "replaced", key: "posts.read", target: ["post:2"] };
+  assertEquals(await ctx.can("posts.read", ["post:2"]), {
+    ok: true,
+    matchedGrants: ["replaced", "second"],
+  });
+});
