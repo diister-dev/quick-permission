@@ -61,15 +61,32 @@ export type MongoSpec = Record<string, unknown>;
  * check time, pour empêcher l'exécution de code arbitraire.
  */
 export function validateSpec(spec: unknown, path = "$"): void {
-  if (spec === null || typeof spec !== "object") return;
-  if (Array.isArray(spec)) {
-    // A `for` loop, not `forEach`: the arrow's implicit return handed back
-    // validateSpec's value, which the iteration then discarded.
-    for (const [i, item] of spec.entries()) {
-      validateSpec(item, `${path}[${i}]`);
-    }
-    return;
+  inspectSpec(spec, path);
+}
+
+/** Validates like `validateSpec` and tells whether the spec survives a JSON round trip unchanged. */
+function inspectSpec(spec: unknown, path: string): boolean {
+  switch (typeof spec) {
+    case "string":
+    case "boolean":
+      return true;
+    case "number":
+      return Number.isFinite(spec) && !Object.is(spec, -0);
+    case "object":
+      break;
+    default:
+      return false;
   }
+  if (spec === null) return true;
+  let pure = true;
+  if (Array.isArray(spec)) {
+    for (const [i, item] of spec.entries()) {
+      if (!inspectSpec(item, `${path}[${i}]`)) pure = false;
+    }
+    return pure;
+  }
+  const proto = Object.getPrototypeOf(spec);
+  if (proto !== Object.prototype && proto !== null) pure = false;
   for (const [key, value] of Object.entries(spec as object)) {
     if (key.startsWith("$")) {
       if (!ALLOWED_OPERATORS.has(key)) {
@@ -79,8 +96,48 @@ export function validateSpec(spec: unknown, path = "$"): void {
         );
       }
     }
-    validateSpec(value, `${path}.${key}`);
+    if (!inspectSpec(value, `${path}.${key}`)) pure = false;
   }
+  return pure;
+}
+
+type SpecTester = (doc: unknown) => boolean;
+
+const COMPILED_LIMIT = 512;
+const compiled = new Map<string, SpecTester>();
+
+// deno-lint-ignore no-explicit-any
+const compile = (spec: unknown): SpecTester => (sift as any)(spec);
+
+/**
+ * Validates then compiles. A JSON-only spec is cached by its serialized form
+ * and compiled from a private copy, so mutating the caller's object later
+ * never reaches the cached tester; any other spec is compiled afresh.
+ */
+export function compileSpec(spec: unknown): SpecTester {
+  return prepareSpec(spec)();
+}
+
+/** Validates now and compiles on the first call, for callers that must not compile a spec they end up not evaluating. */
+export function prepareSpec(spec: unknown): () => SpecTester {
+  const pure = inspectSpec(spec, "$");
+  let tester: SpecTester | undefined;
+  return () => {
+    tester ??= pure ? compileCached(spec) : compile(spec);
+    return tester;
+  };
+}
+
+function compileCached(spec: unknown): SpecTester {
+  const key = JSON.stringify(spec);
+  const known = compiled.get(key);
+  if (known) return known;
+  const tester = compile(JSON.parse(key));
+  if (compiled.size >= COMPILED_LIMIT) {
+    compiled.delete(compiled.keys().next().value as string);
+  }
+  compiled.set(key, tester);
+  return tester;
 }
 
 /**
@@ -88,7 +145,5 @@ export function validateSpec(spec: unknown, path = "$"): void {
  * rejeter tout opérateur non-whitelisté.
  */
 export function evaluateSpec(spec: MongoSpec, doc: unknown): boolean {
-  validateSpec(spec);
-  // deno-lint-ignore no-explicit-any
-  return (sift as any)(spec)(doc);
+  return compileSpec(spec)(doc);
 }

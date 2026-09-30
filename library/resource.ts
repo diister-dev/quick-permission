@@ -30,7 +30,7 @@
 
 import type { FetchCtx, Grant, Resource, Rule } from "./types.ts";
 import { deepEqual, defineRule } from "./rules.ts";
-import { evaluateSpec, validateSpec } from "./mongo-query.ts";
+import { prepareSpec } from "./mongo-query.ts";
 
 class ResourceImpl<T> implements Resource<T> {
   // Spelled out rather than declared as constructor parameter properties:
@@ -94,12 +94,14 @@ class ResourceImpl<T> implements Resource<T> {
     return defineRule({
       kind: "match",
       needs: [this] as const,
+      fetchWhen: (grant) => grant.with?.[id] !== undefined,
       check: ([data], _payload, ctx) => {
         const spec = ctx.grant.with?.[id];
         if (spec === undefined) return { ok: true };
 
+        let tester: (() => (doc: unknown) => boolean) | undefined;
         if (typeof spec === "object" && spec !== null) {
-          validateSpec(spec);
+          tester = prepareSpec(spec);
         }
 
         // Cap-mode without fetched data: silent-pass + expose spec as
@@ -129,8 +131,7 @@ class ResourceImpl<T> implements Resource<T> {
             ? { ok: true }
             : { ok: false, reason: `match[${id}] mismatch` };
         }
-        const passes = evaluateSpec(spec as Record<string, unknown>, actual);
-        if (!passes) {
+        if (!tester!()(actual)) {
           return { ok: false, reason: `match[${id}] mismatch` };
         }
         // Concrete mode (or cap-mode w/ fetched data): the rule resolved

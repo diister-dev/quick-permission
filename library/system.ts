@@ -8,6 +8,7 @@ import type {
   ListEntry,
   Permission,
   Resource,
+  Rule,
   SerializableSegment,
   SerializableTarget,
   Subject,
@@ -266,18 +267,18 @@ function targetMatches(
   });
 }
 
-function expandGrants<TMeta>(
+type ExpandedGrant = { readonly grant: Grant; readonly depth: number };
+
+function expandGrantsByKey<TMeta>(
   grants: readonly Grant[],
   schema: Readonly<Record<string, Permission<TMeta>>>,
   maxDepth = 10,
-): Grant[] {
-  const out: Grant[] = [];
-  const queue: Array<{ grant: Grant; depth: number }> = grants.map((g) => ({
-    grant: g,
-    depth: 0,
-  }));
+): Map<string, ExpandedGrant[]> {
+  const byKey = new Map<string, ExpandedGrant[]>();
+  const queue: ExpandedGrant[] = grants.map((g) => ({ grant: g, depth: 0 }));
   for (let head = 0; head < queue.length; head++) {
-    const { grant, depth } = queue[head];
+    const entry = queue[head];
+    const { grant, depth } = entry;
     const perm = schema[grant.key];
     if (
       perm &&
@@ -286,7 +287,9 @@ function expandGrants<TMeta>(
     ) {
       continue;
     }
-    out.push(grant);
+    const list = byKey.get(grant.key);
+    if (list) list.push(entry);
+    else byKey.set(grant.key, [entry]);
     if (depth >= maxDepth) continue;
     if (perm?.expandsTo) {
       const children = perm.expandsTo(grant);
@@ -295,7 +298,22 @@ function expandGrants<TMeta>(
       }
     }
   }
-  return out;
+  return byKey;
+}
+
+// Expanding providers one by one and interleaving by depth reproduces the
+// breadth-first order of expanding their concatenation.
+function mergeByDepth(
+  lists: readonly (readonly ExpandedGrant[])[],
+): readonly ExpandedGrant[] {
+  if (lists.length === 1) return lists[0];
+  return lists.flat().sort((a, b) => a.depth - b.depth);
+}
+
+function sameGrants(a: readonly Grant[], b: readonly Grant[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 
 function serializeSegment(s: {
@@ -511,6 +529,60 @@ export function createSystem<TMeta = unknown>(opts: {
     }
   }
 
+  const expansions = new WeakMap<
+    ProviderOutcome,
+    {
+      readonly source: readonly Grant[];
+      readonly byKey: Map<string, ExpandedGrant[]>;
+    }
+  >();
+
+  function expansionOf(
+    outcome: ProviderOutcome,
+  ): ReadonlyMap<string, readonly ExpandedGrant[]> {
+    const known = expansions.get(outcome);
+    if (known && sameGrants(known.source, outcome.grants)) return known.byKey;
+    const byKey = expandGrantsByKey(outcome.grants, schema);
+    expansions.set(outcome, { source: [...outcome.grants], byKey });
+    return byKey;
+  }
+
+  type PermissionPlan = {
+    readonly segmentIndexById: ReadonlyMap<string, number>;
+    readonly fetchableIndirects: readonly {
+      readonly rule: Rule;
+      readonly ir: IndirectResource;
+    }[];
+    readonly declaredIndirects: readonly IndirectResource[];
+  };
+  const plans = new Map<Permission<TMeta>, PermissionPlan>();
+
+  function planFor(perm: Permission<TMeta>): PermissionPlan {
+    const known = plans.get(perm);
+    if (known) return known;
+    const segmentIndexById = new Map<string, number>();
+    if (perm.target.kind !== "none") {
+      const segments =
+        perm.target.kind === "path"
+          ? perm.target.segments
+          : [perm.target.segments[0]];
+      segments.forEach((seg, i) => {
+        if (seg) segmentIndexById.set(seg.name, i);
+      });
+    }
+    const fetchableIndirects: { rule: Rule; ir: IndirectResource }[] = [];
+    const declaredIndirects: IndirectResource[] = [];
+    for (const rule of perm.rules) {
+      const ir = extractIndirectResource(rule);
+      if (!ir) continue;
+      declaredIndirects.push(ir);
+      if (ir.fetcher !== undefined) fetchableIndirects.push({ rule, ir });
+    }
+    const plan = { segmentIndexById, fetchableIndirects, declaredIndirects };
+    plans.set(perm, plan);
+    return plan;
+  }
+
   return {
     list() {
       return Object.entries(schema).map(([key, perm]) => {
@@ -627,7 +699,8 @@ export function createSystem<TMeta = unknown>(opts: {
     key: string,
     target: readonly unknown[] | undefined,
   ): Promise<ProviderOutcome> {
-    const started = performance.now();
+    const onFetch = hooks.onProviderFetch;
+    const started = onFetch ? performance.now() : 0;
     let grants: readonly Grant[];
     try {
       grants =
@@ -648,9 +721,10 @@ export function createSystem<TMeta = unknown>(opts: {
         failure: `provider ${name} failed: ${describeError(error)}`,
       };
     }
+    if (!onFetch) return { grants };
     const durationMs = performance.now() - started;
     callHook(() =>
-      hooks.onProviderFetch?.({
+      onFetch({
         provider: name,
         subject,
         key,
@@ -670,10 +744,6 @@ export function createSystem<TMeta = unknown>(opts: {
     state: ContextState | undefined,
   ): Promise<ProviderOutcome> {
     const name = providerNames.get(provider) ?? "provider";
-    if (typeof provider === "object") {
-      if (!providerHandlesKey(provider, key)) return { grants: [] };
-      if (!providerHandlesTarget(provider, target)) return { grants: [] };
-    }
     let ck: string | undefined;
     try {
       ck =
@@ -767,28 +837,40 @@ export function createSystem<TMeta = unknown>(opts: {
     const arityErr = validateArity(perm, target);
     if (arityErr) return { ok: false, reasons: [arityErr] };
 
-    const allGrants: Grant[] = [];
-    const failures: string[] = [];
+    const consulted: Provider[] = [];
     for (const provider of providers) {
-      const outcome = await invokeProvider(
-        provider,
-        subject,
-        key,
-        target,
-        state,
-      );
-      allGrants.push(...outcome.grants);
+      if (typeof provider === "object") {
+        if (!providerHandlesKey(provider, key)) continue;
+        if (!providerHandlesTarget(provider, target)) continue;
+      }
+      consulted.push(provider);
+    }
+    const outcomes = await Promise.all(
+      consulted.map((provider) =>
+        invokeProvider(provider, subject, key, target, state),
+      ),
+    );
+    const failures: string[] = [];
+    for (const outcome of outcomes) {
       if (outcome.failure) failures.push(outcome.failure);
     }
 
-    const expanded = expandGrants(allGrants, schema);
+    const forKey: (readonly ExpandedGrant[])[] = [];
+    for (const outcome of outcomes) {
+      if (outcome.grants.length === 0) continue;
+      const list = expansionOf(outcome).get(key);
+      if (list) forKey.push(list);
+    }
 
     const capability = isCapabilityQuery(target);
-    const matching = expanded.filter(
-      (g) =>
-        g.key === key &&
-        targetMatches(g.target, target, perm.target.kind, capability),
-    );
+    const matching: Grant[] = [];
+    if (forKey.length > 0) {
+      for (const { grant } of mergeByDepth(forKey)) {
+        if (targetMatches(grant.target, target, perm.target.kind, capability)) {
+          matching.push(grant);
+        }
+      }
+    }
     if (matching.length === 0) {
       return { ok: false, reasons: ["no matching grant", ...failures] };
     }
@@ -801,6 +883,8 @@ export function createSystem<TMeta = unknown>(opts: {
     let referenceSource: unknown = undefined;
     let filterUnion: FilterUnion = undefined;
     const successfulGrants: Grant[] = [];
+    const plan = planFor(perm);
+    const requestTarget = target ?? [];
 
     for (const grant of matching) {
       const ctx: FetchCtx = {
@@ -818,65 +902,51 @@ export function createSystem<TMeta = unknown>(opts: {
         return r.needs.every((res) => res.isActiveFor(grant));
       });
 
-      // A capability query still fetches a resource named like a segment
-      // (`resource.id === segment.name`) when that segment is concrete.
-      const requestTarget = target ?? [];
-      const targetSegmentIndexById = (() => {
-        const out = new Map<string, number>();
-        if (perm.target.kind === "none") return out;
-        const segments =
-          perm.target.kind === "path"
-            ? perm.target.segments
-            : [perm.target.segments[0]];
-        segments.forEach((seg, i) => {
-          if (seg) out.set(seg.name, i);
-        });
-        return out;
-      })();
-      const uniqueResources = capability
-        ? Array.from(
-            new Map(
-              activeRules
-                .flatMap((r) => r.needs)
-                .filter((r) => {
-                  const idx = targetSegmentIndexById.get(r.id);
-                  if (idx === undefined) return false;
-                  const seg = requestTarget[idx];
-                  return seg !== undefined && !isWildcardSegment(seg);
-                })
-                .map((r) => [r.id, r] as const),
-            ).values(),
-          )
-        : Array.from(
-            new Map(
-              activeRules
-                .flatMap((r) => r.needs)
-                .map((r) => [r.id, r] as const),
-            ).values(),
-          );
       let grantOk = true;
       let grantData: unknown = undefined;
       const grantConstraints: Record<string, unknown>[] = [];
       const grantFilters: FilterContribution[] = [];
       let grantHasMatchRule = false;
       try {
+        const indirectsToFetch = new Map<string, IndirectResource>();
+        const indirectSources = new Set<string>();
+        if (!capability) {
+          for (const { rule, ir } of plan.fetchableIndirects) {
+            if (indirectsToFetch.has(ir.id)) continue;
+            if (grant.with?.[ir.id] === undefined) continue;
+            if (!activeRules.includes(rule)) continue;
+            indirectsToFetch.set(ir.id, ir);
+            indirectSources.add(ir.from.id);
+          }
+        }
+        const uniqueResources = new Map<string, Resource<unknown>>();
+        for (const rule of activeRules) {
+          const reads = rule.fetchWhen === undefined || rule.fetchWhen(grant);
+          for (const r of rule.needs) {
+            // A capability query still fetches a resource named like a segment
+            // (`resource.id === segment.name`) when that segment is concrete.
+            if (capability) {
+              const idx = plan.segmentIndexById.get(r.id);
+              if (idx === undefined) continue;
+              const seg = requestTarget[idx];
+              if (seg === undefined || isWildcardSegment(seg)) continue;
+            }
+            if (!reads && !indirectSources.has(r.id)) continue;
+            uniqueResources.set(r.id, r);
+          }
+        }
+
         const fetched = new Map<string, unknown>();
         await Promise.all(
-          uniqueResources.map(async (r) => {
+          Array.from(uniqueResources.values(), async (r) => {
             fetched.set(r.id, await fetchResource(r, ctx, state));
           }),
         );
 
         const indirectFetched = new Map<string, readonly unknown[]>();
-        if (!capability) {
-          const indirectsToFetch = perm.rules
-            .map((r) => extractIndirectResource(r))
-            .filter(
-              (ir): ir is IndirectResource =>
-                ir !== null && ir.fetcher !== undefined,
-            );
+        if (indirectsToFetch.size > 0) {
           await Promise.all(
-            indirectsToFetch.map(async (ir) => {
+            Array.from(indirectsToFetch.values(), async (ir) => {
               const sourceDoc = fetched.get(ir.from.id);
               if (sourceDoc === undefined || sourceDoc === null) return;
               const cacheKey = ir.cacheKeyForTarget(ctx.target);
@@ -969,11 +1039,7 @@ export function createSystem<TMeta = unknown>(opts: {
       lastData,
     );
 
-    const declaredIndirect: IndirectResource[] = [];
-    for (const rule of perm.rules) {
-      const ir = extractIndirectResource(rule);
-      if (ir) declaredIndirect.push(ir);
-    }
+    const declaredIndirect = plan.declaredIndirects;
     let stages: readonly Record<string, unknown>[] | undefined;
     if (declaredIndirect.length > 0) {
       const baseFilter = constraints ?? {};
