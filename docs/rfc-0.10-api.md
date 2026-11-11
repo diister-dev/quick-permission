@@ -313,7 +313,7 @@ The engine is written directly around entities and paths: no translation to an i
 ## 11. Guard rails, as they held
 
 1. The 164 tests of the 0.9 engine were ported to this API and passed on the 0.9 engine before it was touched: 140 as they were, the rest listed below. They then ran against the rewritten engine, and the 0.9 engine and its own tests were deleted.
-2. Measured with `scripts/bench.ts` and `scripts/drive-bench.ts`. One check: 7 µs on 0.9, 4 µs now. A 100-row page: 1,123 µs through the 0.9 entity layer, about 560 µs now (two decisions per row, as before: may it be listed, and which fields). The heaviest case of the drive benchmark (1,000 grants, 100 files): 866 ms on 0.9, 571 ms now.
+2. Measured with `scripts/bench.ts` and `scripts/drive-bench.ts`. One check: 7 µs on 0.9, 3 to 5 µs now. A 100-row page: 1,123 µs through the 0.9 entity layer, about 330 µs now (two decisions per row, as before: may it be listed, and which fields). The heaviest case of the drive benchmark (1,000 grants, 100 files): 866 ms on 0.9, about 320 ms now. A first application showed what these benches missed: a subject holding the whole catalogue paid a full expansion on every request, which is why a bundle is now expanded only for the key being checked.
 3. The library is judged on its own: no guard rail depends on an application. A second domain (`examples/workspace.ts`, `test/workspace_test.ts`) replays checks, lists, relations, boundaries, the envelope and an ownership change.
 4. Behaviours kept, each with its test: deny by default, a provider or loader error never grants a right, a capability question loads no document it does not need, a target of the wrong arity is refused.
 5. `test/relations_mongo_test.ts` runs the pipelines against a real MongoDB: every row set the 0.9 tests expected is returned, and a row matching the entity condition of one grant and the joined condition of another is not.
@@ -328,8 +328,11 @@ What changed on purpose, compared with 0.9:
 - A bundle cycle, or a bundle including a key the system does not hold, fails when the system is created.
 - No check outside a context. No optional target. No schema tree. A document source tied to the subject instead of the target is no longer declarable: a custom rule loads what it needs.
 - A provider returns a fresh list: a grant or a list mutated in place after it was returned is not looked at again.
+- A bundle is expanded for the key being checked. A child a bundle cannot carry is reported when a check first reaches it; `system.audit(grants)` reports them all at once.
+- A loader that throws denies the grants that needed its document, and is reported through `onError`. On 0.9 the error reached the caller.
 
 ## 12. What is left
 
-1. Release 0.10.0.
-2. Integrate into the consuming applications: stored grants migrate to the new shape (`docs/migrating-to-0.10.md`), relations gain a `load`, list queries read `scope.query`.
+1. A stable 0.10.0, once an application has run the betas in production.
+2. Known gaps: `seed` cannot record that a document is absent; no SQL adapter; ownership is followed one step.
+3. Applications on 0.9 migrate with `docs/migrating-to-0.10.md`: stored grants take the new shape, relations gain a `load`, list queries read `scope.query`.
