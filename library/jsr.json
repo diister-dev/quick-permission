@@ -1,6 +1,6 @@
 {
   "name": "@diister/quick-permission",
-  "version": "0.9.0-beta.9",
+  "version": "0.10.0-beta.1",
   "description": "Declarative, type-safe permission rules with MongoDB query generation",
   "license": "MIT",
   "exports": {
@@ -8,9 +8,10 @@
   },
   "publish": {
     "include": [
-      "core/**/*.ts",
-      "sift/**/*.ts",
       "*.ts",
+      "storage/**/*.ts",
+      "engine/**/*.ts",
+      "sift/**/*.ts",
       "README.md",
       "LICENSE",
       "jsr.json"
