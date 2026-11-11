@@ -1,234 +1,166 @@
 import { test } from "node:test";
-import { assertEquals } from "./+assert.ts";
-import { createSystem, permission, resource, target } from "../mod.ts";
+import { ALL, action, createSystem, entity, permissions } from "../mod.ts";
+import { assert, assertEquals } from "./+assert.ts";
 
-test("resource fetcher is invoked with subject + target + grant", async () => {
-  const captured: { subject: string; target: readonly unknown[] }[] = [];
-  const userOf = resource({
-    id: "user",
-    fetch: ({ subject, target }) => {
-      captured.push({ subject: subject.id, target });
-      return { _id: target[0] as string, name: "Alice" };
+test("load is invoked with the target ids", async () => {
+  const loaded: string[][] = [];
+  const user = entity("user", {
+    load: (id) => {
+      loaded.push([id]);
+      return { _id: id, name: "Alice" };
     },
   });
-
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        userOf.match(),
-      ]),
-    },
+  const users = permissions(user, "users", { read: action() });
+  const system = createSystem({
+    permissions: [users],
     providers: [
-      () => [
-        {
-          key: "users.read",
-          target: ["user:abc"],
-          with: { user: { name: "Alice" } },
-        },
-      ],
+      () => [users.grant("read", { on: "user:abc", where: { name: "Alice" } })],
     ],
   });
 
-  const result = await sys
+  const result = await system
     .context({ subject: { id: "user:caller" } })
-    .can("users.read", ["user:abc"]);
+    .check("users.read", "user:abc");
   assertEquals(result.ok, true);
-  assertEquals(captured.length, 1);
-  assertEquals(captured[0].subject, "user:caller");
-  assertEquals(captured[0].target, ["user:abc"]);
+  assertEquals(loaded, [["user:abc"]]);
 });
 
-test("match silent-pass when grant.with[id] is undefined", async () => {
-  const userOf = resource({
-    id: "user",
-    fetch: ({ target }) => ({ _id: target[0], name: "Alice" }),
+test("a grant without where passes on the document", async () => {
+  const user = entity("user", {
+    load: (id) => ({ _id: id, name: "Alice" }),
+  });
+  const users = permissions(user, "users", { read: action() });
+  const system = createSystem({
+    permissions: [users],
+    providers: [() => [users.grant("read", { on: ALL })]],
   });
 
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        userOf.match(),
-      ]),
-    },
-    providers: [() => [{ key: "users.read", target: ["user:*"] }]],
-  });
-
-  const result = await sys
+  const result = await system
     .context({ subject: { id: "user:1" } })
-    .can("users.read", ["user:abc"]);
+    .check("users.read", "user:abc");
   assertEquals(result.ok, true);
 });
 
-test("match denies when grant.with[id] mismatches the resource", async () => {
-  const userOf = resource({
-    id: "user",
-    fetch: ({ target }) => ({ _id: target[0], status: "active" }),
+test("a where that does not hold on the document denies", async () => {
+  const user = entity("user", {
+    load: (id) => ({ _id: id, status: "active" }),
   });
-
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        userOf.match(),
-      ]),
-    },
+  const users = permissions(user, "users", { read: action() });
+  const system = createSystem({
+    permissions: [users],
     providers: [
-      () => [
-        {
-          key: "users.read",
-          target: ["user:*"],
-          with: { user: { status: "suspended" } },
-        },
-      ],
+      () => [users.grant("read", { on: ALL, where: { status: "suspended" } })],
     ],
   });
 
-  const result = await sys
+  const result = await system
     .context({ subject: { id: "user:1" } })
-    .can("users.read", ["user:abc"]);
+    .check("users.read", "user:abc");
   assertEquals(result.ok, false);
 });
 
-test("filter without grant.filter returns the full resource as data", async () => {
-  const userOf = resource({
-    id: "user",
-    fetch: () => ({ _id: "user:abc", firstname: "Alice", email: "a@ex.com" }),
+test("fields: doc without a field list returns the full document", async () => {
+  const user = entity("user", {
+    load: () => ({ _id: "user:abc", firstname: "Alice", email: "a@ex.com" }),
+  });
+  const users = permissions(user, "users", {
+    read: action({ fields: "doc" }),
+  });
+  const system = createSystem({
+    permissions: [users],
+    providers: [() => [users.grant("read", { on: ALL })]],
   });
 
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        userOf.filter(),
-      ]),
-    },
-    providers: [() => [{ key: "users.read", target: ["user:*"] }]],
-  });
-
-  const result = await sys
+  const result = await system
     .context({ subject: { id: "user:1" } })
-    .can("users.read", ["user:abc"]);
-  assertEquals(result.ok, true);
-  if (result.ok) {
-    assertEquals(result.data, {
-      _id: "user:abc",
-      firstname: "Alice",
-      email: "a@ex.com",
-    });
-  }
+    .check("users.read", "user:abc");
+  assert(result.ok);
+  assertEquals(result.doc, {
+    _id: "user:abc",
+    firstname: "Alice",
+    email: "a@ex.com",
+  });
 });
 
-test("filter with grant.filter projects only allowed fields", async () => {
-  const userOf = resource({
-    id: "user",
-    fetch: () => ({ _id: "user:abc", firstname: "Alice", email: "a@ex.com" }),
+test("fields: doc with a field list projects only allowed fields", async () => {
+  const user = entity("user", {
+    load: () => ({ _id: "user:abc", firstname: "Alice", email: "a@ex.com" }),
   });
-
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        userOf.filter(),
-      ]),
-    },
+  const users = permissions(user, "users", {
+    read: action({ fields: "doc" }),
+  });
+  const system = createSystem({
+    permissions: [users],
     providers: [
-      () => [
-        {
-          key: "users.read",
-          target: ["user:*"],
-          filter: { firstname: true },
-        },
-      ],
+      () => [users.grant("read", { on: ALL, fields: { firstname: true } })],
     ],
   });
 
-  const result = await sys
+  const result = await system
     .context({ subject: { id: "user:1" } })
-    .can("users.read", ["user:abc"]);
-  assertEquals(result.ok, true);
-  if (result.ok) {
-    assertEquals(result.data, { firstname: "Alice" });
-  }
+    .check("users.read", "user:abc");
+  assert(result.ok);
+  assertEquals(result.doc, { firstname: "Alice" });
 });
 
-test("includes lazy-active : not invoked when grant has no spec", async () => {
-  let extractorCalls = 0;
-  const userOf = resource({
-    id: "user",
-    fetch: () => ({ _id: "user:abc", roles: ["role:editor"] }),
+test("a grant without where never loads the document", async () => {
+  let loads = 0;
+  const user = entity("user", {
+    load: () => {
+      loads++;
+      return { _id: "user:abc", roles: ["role:editor"] };
+    },
+  });
+  const users = permissions(user, "users", { read: action() });
+  const system = createSystem({
+    permissions: [users],
+    providers: [() => [users.grant("read", { on: ALL })]],
   });
 
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        userOf.includes("requiredRole", (u) => {
-          extractorCalls++;
-          return u.roles;
+  const result = await system
+    .context({ subject: { id: "user:1" } })
+    .check("users.read", "user:abc");
+  assertEquals(result.ok, true);
+  assertEquals(loads, 0);
+});
+
+test("a where on an array field denies when the required value is absent", async () => {
+  const user = entity("user", {
+    load: () => ({ _id: "user:abc", roles: ["role:viewer"] }),
+  });
+  const users = permissions(user, "users", { read: action() });
+  const system = createSystem({
+    permissions: [users],
+    providers: [
+      () => [users.grant("read", { on: ALL, where: { roles: "role:editor" } })],
+    ],
+  });
+
+  const result = await system
+    .context({ subject: { id: "user:1" } })
+    .check("users.read", "user:abc");
+  assertEquals(result.ok, false);
+});
+
+test("a where on an array field accepts any of several values", async () => {
+  const user = entity("user", {
+    load: () => ({ _id: "user:abc", roles: ["role:editor"] }),
+  });
+  const users = permissions(user, "users", { read: action() });
+  const system = createSystem({
+    permissions: [users],
+    providers: [
+      () => [
+        users.grant("read", {
+          on: ALL,
+          where: { roles: { $in: ["role:admin", "role:editor"] } },
         }),
-      ]),
-    },
-    providers: [() => [{ key: "users.read", target: ["user:*"] }]],
-  });
-
-  // Pas de `with.requiredRole` → la rule includes est skip → extractor non appelé
-  const result = await sys
-    .context({ subject: { id: "user:1" } })
-    .can("users.read", ["user:abc"]);
-  assertEquals(result.ok, true);
-  assertEquals(extractorCalls, 0);
-});
-
-test("includes denies when required role is absent from list", async () => {
-  const userOf = resource({
-    id: "user",
-    fetch: () => ({ _id: "user:abc", roles: ["role:viewer"] }),
-  });
-
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        userOf.includes("requiredRole", (u) => u.roles),
-      ]),
-    },
-    providers: [
-      () => [
-        {
-          key: "users.read",
-          target: ["user:*"],
-          with: { requiredRole: "role:editor" },
-        },
       ],
     ],
   });
 
-  const result = await sys
+  const result = await system
     .context({ subject: { id: "user:1" } })
-    .can("users.read", ["user:abc"]);
-  assertEquals(result.ok, false);
-});
-
-test("includes accepts an array of acceptable values (any-of)", async () => {
-  const userOf = resource({
-    id: "user",
-    fetch: () => ({ _id: "user:abc", roles: ["role:editor"] }),
-  });
-
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        userOf.includes("requiredRole", (u) => u.roles),
-      ]),
-    },
-    providers: [
-      () => [
-        {
-          key: "users.read",
-          target: ["user:*"],
-          with: { requiredRole: ["role:admin", "role:editor"] },
-        },
-      ],
-    ],
-  });
-
-  const result = await sys
-    .context({ subject: { id: "user:1" } })
-    .can("users.read", ["user:abc"]);
+    .check("users.read", "user:abc");
   assertEquals(result.ok, true);
 });

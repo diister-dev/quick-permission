@@ -1,242 +1,119 @@
 import { test } from "node:test";
+import {
+  action,
+  createSystem,
+  entity,
+  type Grant,
+  permissions,
+} from "../mod.ts";
 import { assertEquals } from "./+assert.ts";
-import { createSystem, inputMatch, permission, target } from "../mod.ts";
 
-const schema = {
-  "invitations.create": permission({
-    target: target.path("exposition", "expo_organization"),
-  }).rules([inputMatch()]),
-};
-
-const CONCRETE_TARGET = ["exposition:e1", "expo_organization:o1"] as const;
-
-test("inputMatch: unconditional grant + input → ok", async () => {
-  const sys = createSystem({
-    schema,
-    providers: [
-      () => [
-        {
-          key: "invitations.create",
-          target: ["exposition:e1", "expo_organization:o1"],
-        },
-      ],
-    ],
-  });
-  const r = await sys
-    .context({ subject: { id: "user:1" } })
-    .can("invitations.create", CONCRETE_TARGET);
-  assertEquals(r.ok, true);
+const exposition = entity("exposition", {});
+const organization = exposition.child("expo_organization", {});
+const invitations = permissions(organization, "invitations", {
+  create: action({ input: true }),
 });
 
-test("inputMatch: unconditional grant + no input → ok", async () => {
-  const sys = createSystem({
-    schema,
-    providers: [
-      () => [
-        {
-          key: "invitations.create",
-          target: ["exposition:e1", "expo_organization:o1"],
-        },
-      ],
-    ],
+const ON = ["exposition:e1", "expo_organization:o1"] as const;
+
+function contextWith(grants: readonly Grant[]) {
+  return createSystem({
+    permissions: [invitations],
+    providers: [() => grants],
+  }).context({ subject: { id: "user:1" } });
+}
+
+test("input: unconditional grant + input -> ok", async () => {
+  const ctx = contextWith([invitations.grant("create", { on: ON })]);
+  const result = await ctx.check("invitations.create", ...ON, {
+    input: { flowId: "flow:abc" },
   });
-  const r = await sys.can(
-    { id: "user:1" },
-    "invitations.create",
-    CONCRETE_TARGET,
-  );
-  assertEquals(r.ok, true);
+  assertEquals(result.ok, true);
 });
 
-test("inputMatch: conditional grant + matching input → ok", async () => {
-  const sys = createSystem({
-    schema,
-    providers: [
-      () => [
-        {
-          key: "invitations.create",
-          target: ["exposition:e1", "expo_organization:o1"],
-          inputWith: { flowId: "flow:abc" },
-        },
-      ],
-    ],
-  });
-  const r = await sys.can(
-    { id: "user:1" },
-    "invitations.create",
-    CONCRETE_TARGET,
-    { input: { flowId: "flow:abc" } },
-  );
-  assertEquals(r.ok, true);
+test("input: unconditional grant + no input -> ok", async () => {
+  const ctx = contextWith([invitations.grant("create", { on: ON })]);
+  const result = await ctx.check("invitations.create", ...ON);
+  assertEquals(result.ok, true);
 });
 
-test("inputMatch: conditional grant + mismatched input → deny", async () => {
-  const sys = createSystem({
-    schema,
-    providers: [
-      () => [
-        {
-          key: "invitations.create",
-          target: ["exposition:e1", "expo_organization:o1"],
-          inputWith: { flowId: "flow:abc" },
-        },
-      ],
-    ],
+test("input: conditional grant + matching input -> ok", async () => {
+  const ctx = contextWith([
+    invitations.grant("create", { on: ON, input: { flowId: "flow:abc" } }),
+  ]);
+  const result = await ctx.check("invitations.create", ...ON, {
+    input: { flowId: "flow:abc" },
   });
-  const r = await sys.can(
-    { id: "user:1" },
-    "invitations.create",
-    CONCRETE_TARGET,
-    { input: { flowId: "flow:zzz" } },
-  );
-  assertEquals(r.ok, false);
+  assertEquals(result.ok, true);
 });
 
-test("inputMatch: conditional grant + no input → deny (cannot validate)", async () => {
-  const sys = createSystem({
-    schema,
-    providers: [
-      () => [
-        {
-          key: "invitations.create",
-          target: ["exposition:e1", "expo_organization:o1"],
-          inputWith: { flowId: "flow:abc" },
-        },
-      ],
-    ],
+test("input: conditional grant + mismatched input -> deny", async () => {
+  const ctx = contextWith([
+    invitations.grant("create", { on: ON, input: { flowId: "flow:abc" } }),
+  ]);
+  const result = await ctx.check("invitations.create", ...ON, {
+    input: { flowId: "flow:zzz" },
   });
-  const r = await sys.can(
-    { id: "user:1" },
-    "invitations.create",
-    CONCRETE_TARGET,
-  );
-  assertEquals(r.ok, false);
+  assertEquals(result.ok, false);
 });
 
-test("inputMatch: mixed grants (unconditional + conditional) → broadest wins with input", async () => {
-  const sys = createSystem({
-    schema,
-    providers: [
-      () => [
-        {
-          key: "invitations.create",
-          target: ["exposition:e1", "expo_organization:o1"],
-        },
-        {
-          key: "invitations.create",
-          target: ["exposition:e1", "expo_organization:o1"],
-          inputWith: { flowId: "flow:abc" },
-        },
-      ],
-    ],
-  });
-  // Even a mismatched input passes because the unconditional grant wins.
-  const r = await sys.can(
-    { id: "user:1" },
-    "invitations.create",
-    CONCRETE_TARGET,
-    { input: { flowId: "flow:zzz" } },
-  );
-  assertEquals(r.ok, true);
+test("input: conditional grant + no input -> deny (cannot validate)", async () => {
+  const ctx = contextWith([
+    invitations.grant("create", { on: ON, input: { flowId: "flow:abc" } }),
+  ]);
+  const result = await ctx.check("invitations.create", ...ON);
+  assertEquals(result.ok, false);
 });
 
-test("inputMatch: mixed grants → broadest wins without input", async () => {
-  const sys = createSystem({
-    schema,
-    providers: [
-      () => [
-        {
-          key: "invitations.create",
-          target: ["exposition:e1", "expo_organization:o1"],
-        },
-        {
-          key: "invitations.create",
-          target: ["exposition:e1", "expo_organization:o1"],
-          inputWith: { flowId: "flow:abc" },
-        },
-      ],
-    ],
+test("input: mixed grants (unconditional + conditional) -> broadest wins with input", async () => {
+  const ctx = contextWith([
+    invitations.grant("create", { on: ON }),
+    invitations.grant("create", { on: ON, input: { flowId: "flow:abc" } }),
+  ]);
+  const result = await ctx.check("invitations.create", ...ON, {
+    input: { flowId: "flow:zzz" },
   });
-  // No input + unconditional grant present → still ok.
-  const r = await sys.can(
-    { id: "user:1" },
-    "invitations.create",
-    CONCRETE_TARGET,
-  );
-  assertEquals(r.ok, true);
+  assertEquals(result.ok, true);
 });
 
-test("inputMatch: multiple conditional grants → any matching wins", async () => {
-  const sys = createSystem({
-    schema,
-    providers: [
-      () => [
-        {
-          key: "invitations.create",
-          target: ["exposition:e1", "expo_organization:o1"],
-          inputWith: { flowId: "flow:abc" },
-        },
-        {
-          key: "invitations.create",
-          target: ["exposition:e1", "expo_organization:o1"],
-          inputWith: { flowId: "flow:def" },
-        },
-      ],
-    ],
-  });
-  const r = await sys.can(
-    { id: "user:1" },
-    "invitations.create",
-    CONCRETE_TARGET,
-    { input: { flowId: "flow:def" } },
-  );
-  assertEquals(r.ok, true);
+test("input: mixed grants -> broadest wins without input", async () => {
+  const ctx = contextWith([
+    invitations.grant("create", { on: ON }),
+    invitations.grant("create", { on: ON, input: { flowId: "flow:abc" } }),
+  ]);
+  const result = await ctx.check("invitations.create", ...ON);
+  assertEquals(result.ok, true);
 });
 
-test("inputMatch: nested field in input matches dotted-path with", async () => {
-  const sys = createSystem({
-    schema,
-    providers: [
-      () => [
-        {
-          key: "invitations.create",
-          target: ["exposition:e1", "expo_organization:o1"],
-          inputWith: { "params.expoOrganizationId": "expo_organization:o1" },
-        },
-      ],
-    ],
+test("input: multiple conditional grants -> any matching wins", async () => {
+  const ctx = contextWith([
+    invitations.grant("create", { on: ON, input: { flowId: "flow:abc" } }),
+    invitations.grant("create", { on: ON, input: { flowId: "flow:def" } }),
+  ]);
+  const result = await ctx.check("invitations.create", ...ON, {
+    input: { flowId: "flow:def" },
   });
-  const r = await sys.can(
-    { id: "user:1" },
-    "invitations.create",
-    CONCRETE_TARGET,
-    {
-      input: {
-        flowId: "flow:abc",
-        params: { expoOrganizationId: "expo_organization:o1" },
-      },
+  assertEquals(result.ok, true);
+});
+
+test("input: nested field in input matches a dotted-path condition", async () => {
+  const ctx = contextWith([
+    invitations.grant("create", {
+      on: ON,
+      input: { "params.expoOrganizationId": "expo_organization:o1" },
+    }),
+  ]);
+  const result = await ctx.check("invitations.create", ...ON, {
+    input: {
+      flowId: "flow:abc",
+      params: { expoOrganizationId: "expo_organization:o1" },
     },
-  );
-  assertEquals(r.ok, true);
+  });
+  assertEquals(result.ok, true);
 });
 
-test("inputMatch: empty `with` object treated as unconditional", async () => {
-  const sys = createSystem({
-    schema,
-    providers: [
-      () => [
-        {
-          key: "invitations.create",
-          target: ["exposition:e1", "expo_organization:o1"],
-          inputWith: {},
-        },
-      ],
-    ],
-  });
-  const r = await sys.can(
-    { id: "user:1" },
-    "invitations.create",
-    CONCRETE_TARGET,
-  );
-  assertEquals(r.ok, true);
+test("input: empty input condition treated as unconditional", async () => {
+  const ctx = contextWith([invitations.grant("create", { on: ON, input: {} })]);
+  const result = await ctx.check("invitations.create", ...ON);
+  assertEquals(result.ok, true);
 });

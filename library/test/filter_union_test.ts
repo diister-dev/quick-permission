@@ -1,187 +1,119 @@
-/**
- * Cross-grant filter union: when multiple grants match the same doc, the
- * user must see the most permissive projection. The system unions every
- * matched grant's `filterSpec`. Any grant without a `filter` collapses
- * the union to "all fields".
- */
-
 import { test } from "node:test";
-import { assertEquals } from "./+assert.ts";
 import {
+  ALL,
+  action,
   createSystem,
-  permission,
-  type Provider,
-  resource,
-  target,
+  entity,
+  type Grant,
+  permissions,
 } from "../mod.ts";
+import { assert, assertEquals } from "./+assert.ts";
 
-const userOf = resource({
-  id: "user",
-  fetch: () => ({
+type UserDoc = {
+  readonly _id: string;
+  readonly firstname: string;
+  readonly lastname: string;
+  readonly email: string;
+  readonly phone: string;
+};
+
+const romain: UserDoc = {
+  _id: "user:romain",
+  firstname: "Romain",
+  lastname: "Doe",
+  email: "romain@example.com",
+  phone: "0600",
+};
+
+function usersSet() {
+  const user = entity("user", { load: (): UserDoc => ({ ...romain }) });
+  return permissions(user, "users", { read: action({ fields: "doc" }) });
+}
+
+type UsersSet = ReturnType<typeof usersSet>;
+
+function readAs(users: UsersSet, grants: readonly Grant[]) {
+  const system = createSystem({
+    permissions: [users],
+    providers: [() => grants],
+  });
+  return system
+    .context({ subject: { id: "s" } })
+    .check("users.read", "user:romain");
+}
+
+test("filter union: any grant without fields exposes all fields", async () => {
+  const users = usersSet();
+  const result = await readAs(users, [
+    users.grant("read", { id: "self", on: "user:romain" }),
+    users.grant("read", {
+      id: "manage",
+      on: ALL,
+      fields: { _id: true, firstname: true },
+    }),
+  ]);
+  assert(result.ok);
+  assertEquals(result.doc, romain);
+});
+
+test("filter union: all grants with fields give the union of fields", async () => {
+  const users = usersSet();
+  const result = await readAs(users, [
+    users.grant("read", {
+      id: "g1",
+      on: ALL,
+      fields: { _id: true, firstname: true },
+    }),
+    users.grant("read", {
+      id: "g2",
+      on: ALL,
+      fields: { lastname: true, email: true },
+    }),
+  ]);
+  assert(result.ok);
+  assertEquals(result.doc, {
     _id: "user:romain",
     firstname: "Romain",
     lastname: "Doe",
     email: "romain@example.com",
-    phone: "0600",
-  }),
-  dedupKey: ({ target }) => target[0] as string,
-});
-
-test("filter union: any unfiltered grant exposes all fields", async () => {
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        userOf.match(),
-        userOf.filter(),
-      ]),
-    },
-    providers: [
-      () => [
-        // Self grant: no filter (full access).
-        { id: "self", key: "users.read", target: ["user:romain"] },
-        // Manage grant: filter restricts to {_id, firstname}.
-        {
-          id: "manage",
-          key: "users.read",
-          target: ["user:*"],
-          filter: { _id: true, firstname: true } as Record<string, boolean>,
-        },
-      ],
-    ],
   });
-  const r = await sys
-    .context({ subject: { id: "s" } })
-    .can("users.read", ["user:romain"]);
-  assertEquals(r.ok, true);
-  if (r.ok) {
-    assertEquals(r.data, {
-      _id: "user:romain",
-      firstname: "Romain",
-      lastname: "Doe",
-      email: "romain@example.com",
-      phone: "0600",
-    });
-  }
 });
 
-test("filter union: all grants filtered → union of fields", async () => {
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        userOf.match(),
-        userOf.filter(),
-      ]),
-    },
-    providers: [
-      () => [
-        {
-          id: "g1",
-          key: "users.read",
-          target: ["user:*"],
-          filter: { _id: true, firstname: true } as Record<string, boolean>,
-        },
-        {
-          id: "g2",
-          key: "users.read",
-          target: ["user:*"],
-          filter: { lastname: true, email: true } as Record<string, boolean>,
-        },
-      ],
-    ],
-  });
-  const r = await sys
-    .context({ subject: { id: "s" } })
-    .can("users.read", ["user:romain"]);
-  assertEquals(r.ok, true);
-  if (r.ok) {
-    assertEquals(r.data, {
-      _id: "user:romain",
-      firstname: "Romain",
-      lastname: "Doe",
-      email: "romain@example.com",
-    });
-  }
+test("filter union: a single grant with fields projects normally", async () => {
+  const users = usersSet();
+  const result = await readAs(users, [
+    users.grant("read", {
+      id: "g",
+      on: ALL,
+      fields: { firstname: true, lastname: true },
+    }),
+  ]);
+  assert(result.ok);
+  assertEquals(result.doc, { firstname: "Romain", lastname: "Doe" });
 });
 
-test("filter union: single filtered grant projects normally", async () => {
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        userOf.match(),
-        userOf.filter(),
-      ]),
-    },
-    providers: [
-      () => [
-        {
-          id: "g",
-          key: "users.read",
-          target: ["user:*"],
-          filter: { firstname: true, lastname: true } as Record<
-            string,
-            boolean
-          >,
-        },
-      ],
-    ],
-  });
-  const r = await sys
-    .context({ subject: { id: "s" } })
-    .can("users.read", ["user:romain"]);
-  assertEquals(r.ok, true);
-  if (r.ok) {
-    assertEquals(r.data, { firstname: "Romain", lastname: "Doe" });
-  }
-});
-
-test("filter union: order-independent — manage-then-self vs self-then-manage", async () => {
-  const buildProviders = (
-    order: ["self" | "manage", "self" | "manage"],
-  ): Provider[] => [
-    () =>
-      order.map((kind) =>
-        kind === "self"
-          ? { id: "self", key: "users.read", target: ["user:romain"] }
-          : {
-              id: "manage",
-              key: "users.read",
-              target: ["user:*"],
-              filter: { _id: true, firstname: true } as Record<string, boolean>,
-            },
-      ),
-  ];
-
-  const orders: Array<["self" | "manage", "self" | "manage"]> = [
+test("filter union: order-independent, manage-then-self vs self-then-manage", async () => {
+  const orders: readonly (readonly ["self" | "manage", "self" | "manage"])[] = [
     ["self", "manage"],
     ["manage", "self"],
   ];
   for (const order of orders) {
-    const sys = createSystem({
-      schema: {
-        "users.read": permission({ target: target.required("user") }).rules([
-          userOf.match(),
-          userOf.filter(),
-        ]),
-      },
-      providers: buildProviders(order),
-    });
-    const r = await sys
-      .context({ subject: { id: "s" } })
-      .can("users.read", ["user:romain"]);
-    assertEquals(r.ok, true);
-    if (r.ok) {
-      // Same result regardless of grant order: all fields visible.
-      assertEquals(
-        r.data,
-        {
-          _id: "user:romain",
-          firstname: "Romain",
-          lastname: "Doe",
-          email: "romain@example.com",
-          phone: "0600",
-        },
-        `Order ${order.join("→")} should yield full user`,
-      );
-    }
+    const users = usersSet();
+    const grants = order.map((kind) =>
+      kind === "self"
+        ? users.grant("read", { id: "self", on: "user:romain" })
+        : users.grant("read", {
+            id: "manage",
+            on: ALL,
+            fields: { _id: true, firstname: true },
+          }),
+    );
+    const result = await readAs(users, grants);
+    assert(result.ok);
+    assertEquals(
+      result.doc,
+      romain,
+      `Order ${order.join(" then ")} should yield the full user`,
+    );
   }
 });

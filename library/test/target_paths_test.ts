@@ -1,165 +1,148 @@
 import { test } from "node:test";
+import {
+  ALL,
+  action,
+  createSystem,
+  entity,
+  globalPermissions,
+  permissions,
+} from "../mod.ts";
 import { assertEquals } from "./+assert.ts";
-import { createSystem, permission, resource, target } from "../mod.ts";
 
-const expoOf = resource({
-  id: "exposition",
-  fetch: ({ target }) => ({ _id: target[0] }),
-  dedupKey: ({ target }) => target[0] as string,
+const exposition = entity("exposition", {
+  load: (id) => ({ _id: id }),
 });
-const programOf = resource({
-  id: "program",
-  fetch: ({ target }) => ({ _id: target[1], expoId: target[0] }),
-  dedupKey: ({ target }) => `${target[0]}::${target[1]}`,
+const program = exposition.child("program", {
+  load: (expoId, id) => ({ _id: id, expoId }),
 });
-const regOf = resource({
-  id: "registration",
-  fetch: ({ target }) => ({ _id: target[2], programId: target[1] }),
-  dedupKey: ({ target }) => `${target[0]}::${target[1]}::${target[2]}`,
+const registration = program.child("registration", {
+  load: (_expoId, programId, id) => ({ _id: id, programId }),
+});
+const registrations = permissions(registration, "registrations", {
+  read: action(),
 });
 
-function makeSystem(grants: { id: string; target: readonly unknown[] }[]) {
+type RegistrationOn = readonly [string, string, string] | typeof ALL;
+
+function makeSystem(grants: readonly { id: string; on: RegistrationOn }[]) {
   return createSystem({
-    schema: {
-      "registrations.read": permission({
-        target: target.path("exposition", "program", "registration"),
-      }).rules([expoOf.match(), programOf.match(), regOf.match()]),
-    },
+    permissions: [registrations],
     providers: [
-      () =>
-        grants.map((g) => ({
-          ...g,
-          key: "registrations.read" as const,
-        })),
+      () => grants.map((grant) => registrations.grant("read", grant)),
     ],
   });
 }
 
-test("path 3 segments : grant exact matche le request exact", async () => {
-  const sys = makeSystem([
-    { id: "g1", target: ["exposition:e1", "program:p7", "registration:r1"] },
+test("path of 3 segments: an exact grant matches the exact request", async () => {
+  const system = makeSystem([
+    { id: "g1", on: ["exposition:e1", "program:p7", "registration:r1"] },
   ]);
-  const r = await sys
+  const result = await system
     .context({ subject: { id: "user:1" } })
-    .can("registrations.read", [
+    .check(
+      "registrations.read",
       "exposition:e1",
       "program:p7",
       "registration:r1",
-    ]);
-  assertEquals(r.ok, true);
+    );
+  assertEquals(result.ok, true);
 });
 
-test("path 3 segments : wildcard sur le dernier segment matche n'importe quelle reg", async () => {
-  const sys = makeSystem([
-    { id: "g1", target: ["exposition:e1", "program:p7", "registration:*"] },
+test("path of 3 segments: a wildcard on the last segment matches any registration", async () => {
+  const system = makeSystem([
+    { id: "g1", on: ["exposition:e1", "program:p7", ALL] },
   ]);
-  const r1 = await sys
+  const r1 = await system
     .context({ subject: { id: "user:1" } })
-    .can("registrations.read", [
+    .check(
+      "registrations.read",
       "exposition:e1",
       "program:p7",
       "registration:r1",
-    ]);
-  const r2 = await sys
+    );
+  const r2 = await system
     .context({ subject: { id: "user:1" } })
-    .can("registrations.read", [
+    .check(
+      "registrations.read",
       "exposition:e1",
       "program:p7",
       "registration:r99",
-    ]);
+    );
   assertEquals(r1.ok, true);
   assertEquals(r2.ok, true);
 });
 
-test("path 3 segments : wildcard milieu+fin couvre toutes les regs de l'expo", async () => {
-  const sys = makeSystem([
-    { id: "g1", target: ["exposition:e1", "program:*", "registration:*"] },
-  ]);
-  const r1 = await sys
+test("path of 3 segments: wildcards on the middle and last segments cover every registration of the exposition", async () => {
+  const system = makeSystem([{ id: "g1", on: ["exposition:e1", ALL, ALL] }]);
+  const r1 = await system
     .context({ subject: { id: "user:1" } })
-    .can("registrations.read", [
+    .check(
+      "registrations.read",
       "exposition:e1",
       "program:p7",
       "registration:r1",
-    ]);
-  const r2 = await sys
+    );
+  const r2 = await system
     .context({ subject: { id: "user:1" } })
-    .can("registrations.read", [
+    .check(
+      "registrations.read",
       "exposition:e1",
       "program:p99",
       "registration:r42",
-    ]);
+    );
   assertEquals(r1.ok, true);
   assertEquals(r2.ok, true);
 });
 
-test("path 3 segments : exposition différente = pas de match", async () => {
-  const sys = makeSystem([
-    { id: "g1", target: ["exposition:e1", "program:*", "registration:*"] },
-  ]);
-  const r = await sys
+test("path of 3 segments: another exposition does not match", async () => {
+  const system = makeSystem([{ id: "g1", on: ["exposition:e1", ALL, ALL] }]);
+  const result = await system
     .context({ subject: { id: "user:1" } })
-    .can("registrations.read", [
+    .check(
+      "registrations.read",
       "exposition:e2",
       "program:p1",
       "registration:r1",
-    ]);
-  assertEquals(r.ok, false);
+    );
+  assertEquals(result.ok, false);
 });
 
-test("validation arity : trop court = denied", async () => {
-  const sys = makeSystem([{ id: "g", target: ["e:*", "p:*", "r:*"] }]);
-  const r = await sys
+test("arity: a target too short is denied", async () => {
+  const system = makeSystem([{ id: "g", on: ALL }]);
+  const allowed = await system
     .context({ subject: { id: "user:1" } })
-    .can("registrations.read", ["exposition:e1", "program:p7"]);
-  assertEquals(r.ok, false);
-  if (!r.ok) {
-    assertEquals(r.reasons[0].includes("arity"), true);
-  }
+    .ask("registrations.read", ["exposition:e1", "program:p7"]);
+  assertEquals(allowed, false);
 });
 
-test("validation arity : trop long = denied", async () => {
-  const sys = makeSystem([{ id: "g", target: ["e:*", "p:*", "r:*"] }]);
-  const r = await sys
+test("arity: a target too long is denied", async () => {
+  const system = makeSystem([{ id: "g", on: ALL }]);
+  const allowed = await system
     .context({ subject: { id: "user:1" } })
-    .can("registrations.read", ["e:1", "p:1", "r:1", "extra"]);
-  assertEquals(r.ok, false);
+    .ask("registrations.read", ["e:1", "p:1", "r:1", "extra"]);
+  assertEquals(allowed, false);
 });
 
-test("target.required : actual=1 segment", async () => {
-  const userOf = resource({
-    id: "user",
-    fetch: ({ target }) => ({ _id: target[0] }),
-    dedupKey: ({ target }) => target[0] as string,
+test("one entity: the target has exactly one segment", async () => {
+  const user = entity("user", { load: (id) => ({ _id: id }) });
+  const users = permissions(user, "users", { read: action() });
+  const system = createSystem({
+    permissions: [users],
+    providers: [() => [users.grant("read", { on: ALL })]],
   });
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        userOf.match(),
-      ]),
-    },
-    providers: [() => [{ key: "users.read", target: ["user:*"] }]],
-  });
-  const r = await sys
-    .context({ subject: { id: "user:1" } })
-    .can("users.read", ["user:abc"]);
-  assertEquals(r.ok, true);
-
-  const wrong = await sys
-    .context({ subject: { id: "user:1" } })
-    .can("users.read", ["user:abc", "extra"]);
-  assertEquals(wrong.ok, false);
+  const ctx = system.context({ subject: { id: "user:1" } });
+  assertEquals((await ctx.check("users.read", "user:abc")).ok, true);
+  assertEquals(await ctx.ask("users.read", ["user:abc", "extra"]), false);
 });
 
-test("target.none : actual=0 segments, no target arg passes", async () => {
-  const sys = createSystem({
-    schema: {
-      "users.create": permission({ target: target.none() }).rules([]),
-    },
-    providers: [() => [{ key: "users.create" }]],
+test("no target: a key acting on nothing passes without a target", async () => {
+  const users = globalPermissions("users", { create: action() });
+  const system = createSystem({
+    permissions: [users],
+    providers: [() => [users.grant("create", {})]],
   });
-  const r = await sys
+  const result = await system
     .context({ subject: { id: "user:1" } })
-    .can("users.create");
-  assertEquals(r.ok, true);
+    .check("users.create");
+  assertEquals(result.ok, true);
 });

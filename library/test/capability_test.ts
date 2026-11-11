@@ -1,176 +1,105 @@
-/**
- * Capability query : la request target contient des wildcards
- * (`["role:*"]`, `["expo:*", "badge:*"]`, etc.). Dans ce mode, la
- * resource ne peut pas être fetchée (id concret manquant), donc
- * le système skip les fetches et les rules fail-deny les contraintes
- * non-vérifiables. Sémantique : "ai-je au moins un grant en principe ?"
- */
-
 import { test } from "node:test";
-import { assertEquals } from "./+assert.ts";
-import { createSystem, permission, resource, target } from "../mod.ts";
+import { ALL, action, createSystem, entity, permissions } from "../mod.ts";
+import { assert, assertEquals } from "./+assert.ts";
 
-test("capability query : ne déclenche PAS le fetch (wildcard target)", async () => {
+test("capability query: loads no document", async () => {
   let fetches = 0;
-  const roleOf = resource({
-    id: "role",
-    fetch: ({ target }) => {
+  const role = entity("role", {
+    load: (id) => {
       fetches++;
-      const id = target[0] as string;
-      // Simule un repo qui throw si id n'existe pas — exactement le
-      // scénario qui crashait dans Diivento.
       if (id === "role:*") throw new Error(`Role not found: ${id}`);
       return { _id: id };
     },
-    dedupKey: ({ target }) => target[0] as string,
+  });
+  const roles = permissions(role, "roles", {
+    read: action({ fields: "doc" }),
+  });
+  const system = createSystem({
+    permissions: [roles],
+    providers: [() => [roles.grant("read", { on: ALL })]],
   });
 
-  const sys = createSystem({
-    schema: {
-      "roles.read": permission({ target: target.required("role") }).rules([
-        roleOf.match(),
-        roleOf.filter(),
-      ]),
-    },
-    providers: [() => [{ key: "roles.read", target: ["role:*"] }]],
-  });
-
-  const r = await sys
-    .context({ subject: { id: "user:1" } })
-    .can("roles.read", ["role:*"]);
-  assertEquals(r.ok, true);
+  const ctx = system.context({ subject: { id: "user:1" } });
+  assertEquals(await ctx.could("roles.read"), true);
   assertEquals(fetches, 0);
 });
 
-test("capability query : match avec spec → ok + constraint exposed for pushdown", async () => {
-  const roleOf = resource({
-    id: "role",
-    fetch: () => ({ _id: "role:concrete", level: "admin" }),
-    dedupKey: ({ target }) => target[0] as string,
+test("capability query: a where is exposed as the row filter", async () => {
+  const role = entity("role", {
+    load: () => ({ _id: "role:concrete", level: "admin" }),
   });
-
-  const sys = createSystem({
-    schema: {
-      "roles.read": permission({ target: target.required("role") }).rules([
-        roleOf.match(),
-      ]),
-    },
+  const roles = permissions(role, "roles", { read: action() });
+  const system = createSystem({
+    permissions: [roles],
     providers: [
-      () => [
-        {
-          key: "roles.read",
-          target: ["role:*"],
-          with: { role: { level: "admin" } },
-        },
-      ],
+      () => [roles.grant("read", { on: ALL, where: { level: "admin" } })],
     ],
   });
 
-  const r = await sys
-    .context({ subject: { id: "user:1" } })
-    .can("roles.read", ["role:*"]);
-  assertEquals(r.ok, true);
-  if (r.ok) {
-    assertEquals(r.constraints, { level: "admin" });
-  }
+  const ctx = system.context({ subject: { id: "user:1" } });
+  assertEquals(await ctx.could("roles.read"), true);
+  const scope = await ctx.scope("roles.read");
+  assert(scope.ok);
+  assertEquals(scope.query.filter, { level: "admin" });
+  assertEquals(scope.query.stages, null);
 });
 
-test("capability query : grant sans contraintes ⇒ ok (matrix UI use-case)", async () => {
-  const roleOf = resource({
-    id: "role",
-    fetch: () => {
+test("capability query: a grant without constraints answers yes", async () => {
+  const role = entity("role", {
+    load: (): { _id: string } => {
       throw new Error("should not be called in capability mode");
     },
-    dedupKey: ({ target }) => target[0] as string,
+  });
+  const roles = permissions(role, "roles", {
+    update: action({ fields: "doc" }),
+  });
+  const system = createSystem({
+    permissions: [roles],
+    providers: [() => [roles.grant("update", { on: ALL })]],
   });
 
-  const sys = createSystem({
-    schema: {
-      "roles.update": permission({ target: target.required("role") }).rules([
-        roleOf.match(),
-        roleOf.filter(),
-      ]),
+  const ctx = system.context({ subject: { id: "user:1" } });
+  assertEquals(await ctx.could("roles.update"), true);
+});
+
+test("capability query: a condition that needs the document denies", async () => {
+  const article = entity("article", {
+    load: () => ({ _id: "a", authorId: "user:1" }),
+    conditions: {
+      ownerOnly: { owner: (doc) => doc.authorId },
     },
+  });
+  const articles = permissions(article, "articles", { update: action() });
+  const system = createSystem({
+    permissions: [articles],
     providers: [
-      () => [
-        // Grant simple, sans with/flags → match passe silent, filter passe silent
-        { key: "roles.update", target: ["role:*"] },
-      ],
+      () => [articles.grant("update", { on: ALL, when: ["ownerOnly"] })],
     ],
   });
 
-  const r = await sys
-    .context({ subject: { id: "user:1" } })
-    .can("roles.update", ["role:*"]);
-  assertEquals(r.ok, true);
+  const ctx = system.context({ subject: { id: "user:1" } });
+  assertEquals(await ctx.could("articles.update"), false);
 });
 
-test("capability query : require* DENY (need de la ressource)", async () => {
-  const articleOf = resource({
-    id: "article",
-    fetch: () => ({ _id: "a", authorId: "user:1" }),
-    dedupKey: ({ target }) => target[0] as string,
-  });
-
-  const sys = createSystem({
-    schema: {
-      "articles.update": permission({
-        target: target.required("article"),
-      }).rules([
-        articleOf.match(),
-        articleOf.requireOwner((a) => a.authorId, { flag: "ownerOnly" }),
-      ]),
-    },
-    providers: [
-      () => [
-        {
-          key: "articles.update",
-          target: ["article:*"],
-          flags: { ownerOnly: true },
-        },
-      ],
-    ],
-  });
-
-  // Capability query avec un grant qui exige owner → DENY (cannot verify)
-  const r = await sys
-    .context({ subject: { id: "user:1" } })
-    .can("articles.update", ["article:*"]);
-  assertEquals(r.ok, false);
-});
-
-test("non-capability query : fetch et match marchent normalement", async () => {
+test("concrete check: loads the document and evaluates the where", async () => {
   let fetches = 0;
-  const roleOf = resource({
-    id: "role",
-    fetch: ({ target }) => {
+  const role = entity("role", {
+    load: (id) => {
       fetches++;
-      return { _id: target[0], level: "admin" };
+      return { _id: id, level: "admin" };
     },
-    dedupKey: ({ target }) => target[0] as string,
   });
-
-  const sys = createSystem({
-    schema: {
-      "roles.read": permission({ target: target.required("role") }).rules([
-        roleOf.match(),
-      ]),
-    },
+  const roles = permissions(role, "roles", { read: action() });
+  const system = createSystem({
+    permissions: [roles],
     providers: [
-      () => [
-        {
-          key: "roles.read",
-          target: ["role:*"],
-          with: { role: { level: "admin" } },
-        },
-      ],
+      () => [roles.grant("read", { on: ALL, where: { level: "admin" } })],
     ],
   });
 
-  // Target concret (pas wildcard) → fetch + check normal
-  const r = await sys
+  const result = await system
     .context({ subject: { id: "user:1" } })
-    .can("roles.read", ["role:r1"]);
-  assertEquals(r.ok, true);
+    .check("roles.read", "role:r1");
+  assertEquals(result.ok, true);
   assertEquals(fetches, 1);
 });

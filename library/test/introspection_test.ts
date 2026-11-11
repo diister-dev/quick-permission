@@ -1,190 +1,159 @@
-/**
- * Tests for the catalog introspection API : `System.indirectResources()`
- * and `System.indirectsUsedBy(key)`. These methods exist so consumers
- * (matrix UI / catalog endpoints) can enumerate indirect resources without
- * walking every permission's rules manually.
- */
-
 import { test } from "node:test";
-import { assertEquals } from "./+assert.ts";
 import {
+  type AnyPermissionSet,
+  action,
   createSystem,
-  indirectResource,
-  intermediate,
-  permission,
-  resource,
-  target,
+  entity,
+  list,
+  permissions,
 } from "../mod.ts";
+import { assertEquals } from "./+assert.ts";
 
-const participantOf = resource({
-  id: "participant",
-  fetch: () => ({ _id: "stub" }),
-  dedupKey: ({ target }) => target.join("::"),
-});
-
-const userOf = resource({
-  id: "user",
-  fetch: () => ({ _id: "stub" }),
-  dedupKey: ({ target }) => target.join("::"),
-});
-
-const membershipsOfParticipant = indirectResource({
+const membershipsRelation = {
   id: "memberships_of_participant",
-  from: participantOf,
-  on: { localField: "_id", foreignField: "participantId" },
-  to: { _type: "org_membership" },
-  cardinality: "many",
-});
+  localField: "_id",
+  foreignField: "participantId",
+  only: { _type: "org_membership" },
+  load: (): readonly unknown[] => [],
+};
 
-const usersOfParticipant = indirectResource({
+const usersRelation = {
   id: "users_of_participant",
-  from: participantOf,
-  on: {
-    localField: "userId",
-    foreignField: "_id",
-    foreignCollection: "users",
-  },
-  to: { _type: "user" },
-  cardinality: "one",
+  localField: "userId",
+  foreignField: "_id",
+  foreignCollection: "users",
+  only: { _type: "user" },
+  load: (): readonly unknown[] => [],
+};
+
+const user = entity("user", { load: (): { _id: string } => ({ _id: "stub" }) });
+const users = permissions(user, "users", { read: action() });
+
+const exposition = entity("exposition", {});
+
+function relatedOf(sets: readonly AnyPermissionSet[], key: string) {
+  const entry = createSystem({ permissions: sets })
+    .catalog()
+    .find((item) => item.key === key);
+  return entry?.accepts.related ?? [];
+}
+
+function relationsUsedBy(
+  sets: readonly AnyPermissionSet[],
+  key: string,
+): readonly string[] {
+  return relatedOf(sets, key).map((relation) => relation.id);
+}
+
+function relationsOf(sets: readonly AnyPermissionSet[]): readonly string[] {
+  const ids = new Set<string>();
+  for (const entry of createSystem({ permissions: sets }).catalog()) {
+    for (const relation of entry.accepts.related) ids.add(relation.id);
+  }
+  return [...ids];
+}
+
+test("relations: empty when no entity declares one", () => {
+  assertEquals(relationsOf([users]), []);
 });
 
-test("indirectResources : empty when no indirect rule", () => {
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        userOf.match(),
-      ]),
-    },
+test("relations: returns serialized info", () => {
+  const participant = exposition.child("participant", {
+    load: (): { _id: string } => ({ _id: "stub" }),
+    relations: { memberships: membershipsRelation },
   });
-  assertEquals(sys.indirectResources(), []);
-});
-
-test("indirectResources : returns serialized info", () => {
-  const sys = createSystem({
-    schema: {
-      "expositions.participants.list": permission({
-        target: target.path("exposition", "participant"),
-      }).rules([participantOf.match(), membershipsOfParticipant.match()]),
-    },
+  const participants = permissions(participant, "expositions.participants", {
+    list: action(),
   });
-
-  const indirects = sys.indirectResources();
-  assertEquals(indirects.length, 1);
-  assertEquals(indirects[0], {
+  const related = relatedOf([participants], "expositions.participants.list");
+  assertEquals(related.length, 1);
+  assertEquals(related[0], {
+    name: "memberships",
     id: "memberships_of_participant",
-    kind: "indirect",
-    from: { id: "participant", kind: "direct" },
-    on: { localField: "_id", foreignField: "participantId" },
-    to: { _type: "org_membership" },
-    cardinality: "many",
+    localField: "_id",
+    foreignField: "participantId",
+    only: { _type: "org_membership" },
   });
 });
 
-test("indirectResources : deduplicates across permissions", () => {
-  const sys = createSystem({
-    schema: {
-      "expositions.participants.list": permission({
-        target: target.path("exposition", "participant"),
-      }).rules([membershipsOfParticipant.match()]),
-      "expositions.participants.read": permission({
-        target: target.path("exposition", "participant"),
-      }).rules([membershipsOfParticipant.match()]),
-    },
+test("relations: deduplicated across keys", () => {
+  const participant = exposition.child("participant", {
+    load: (): { _id: string } => ({ _id: "stub" }),
+    relations: { memberships: membershipsRelation },
   });
-
-  // Same `id` referenced twice → one entry, not two.
-  assertEquals(sys.indirectResources().length, 1);
+  const participants = permissions(participant, "expositions.participants", {
+    read: action(),
+    list: list("read"),
+  });
+  assertEquals(relationsOf([participants]).length, 1);
 });
 
-test("indirectResources : preserves foreignCollection when set", () => {
-  const sys = createSystem({
-    schema: {
-      "expositions.participants.list": permission({
-        target: target.path("exposition", "participant"),
-      }).rules([usersOfParticipant.match()]),
-    },
+test("relations: preserves foreignCollection when set", () => {
+  const participant = exposition.child("participant", {
+    load: (): { _id: string; userId: string } => ({
+      _id: "stub",
+      userId: "user:stub",
+    }),
+    relations: { users: usersRelation },
   });
-
-  const [info] = sys.indirectResources();
-  assertEquals(info.on.foreignCollection, "users");
+  const participants = permissions(participant, "expositions.participants", {
+    list: action(),
+  });
+  const [info] = relatedOf([participants], "expositions.participants.list");
+  assertEquals(info.collection, "users");
 });
 
-test("indirectResources : reports both when multiple distinct ids", () => {
-  const sys = createSystem({
-    schema: {
-      "expositions.participants.list": permission({
-        target: target.path("exposition", "participant"),
-      }).rules([membershipsOfParticipant.match(), usersOfParticipant.match()]),
-    },
+test("relations: reports both when an entity declares two", () => {
+  const participant = exposition.child("participant", {
+    load: (): { _id: string; userId: string } => ({
+      _id: "stub",
+      userId: "user:stub",
+    }),
+    relations: { memberships: membershipsRelation, users: usersRelation },
   });
-
-  const ids = sys
-    .indirectResources()
-    .map((r) => r.id)
-    .sort();
-  assertEquals(ids, ["memberships_of_participant", "users_of_participant"]);
+  const participants = permissions(participant, "expositions.participants", {
+    list: action(),
+  });
+  assertEquals([...relationsOf([participants])].sort(), [
+    "memberships_of_participant",
+    "users_of_participant",
+  ]);
 });
 
-test("indirectsUsedBy : empty for unknown key", () => {
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        userOf.match(),
-      ]),
-    },
-  });
-  assertEquals(sys.indirectsUsedBy("nope.unknown"), []);
+test("relations used by a key: empty for an unknown key", () => {
+  assertEquals(relationsUsedBy([users], "nope.unknown"), []);
 });
 
-test("indirectsUsedBy : empty when permission has no indirect rule", () => {
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        userOf.match(),
-      ]),
-    },
-  });
-  assertEquals(sys.indirectsUsedBy("users.read"), []);
+test("relations used by a key: empty when the key's entity has no relation", () => {
+  assertEquals(relationsUsedBy([users], "users.read"), []);
 });
 
-test("indirectsUsedBy : scoped per permission", () => {
-  const sys = createSystem({
-    schema: {
-      "expositions.participants.list": permission({
-        target: target.path("exposition", "participant"),
-      }).rules([membershipsOfParticipant.match()]),
-      "users.read": permission({ target: target.required("user") }).rules([
-        userOf.match(),
-      ]),
-    },
+test("relations used by a key: scoped per key", () => {
+  const participant = exposition.child("participant", {
+    load: (): { _id: string } => ({ _id: "stub" }),
+    relations: { memberships: membershipsRelation },
   });
+  const participants = permissions(participant, "expositions.participants", {
+    list: action(),
+  });
+  const sets = [participants, users];
+  assertEquals(relationsUsedBy(sets, "expositions.participants.list"), [
+    "memberships_of_participant",
+  ]);
+  assertEquals(relationsUsedBy(sets, "users.read"), []);
+});
 
+test("relations used by a key: a list key reports the relations of its entity", () => {
+  const participant = exposition.child("participant", {
+    load: (): { _id: string } => ({ _id: "stub" }),
+    relations: { memberships: membershipsRelation },
+  });
+  const participants = permissions(participant, "expositions.participants", {
+    read: action(),
+    list: list("read"),
+  });
   assertEquals(
-    sys.indirectsUsedBy("expositions.participants.list").map((r) => r.id),
-    ["memberships_of_participant"],
-  );
-  assertEquals(sys.indirectsUsedBy("users.read"), []);
-});
-
-test("indirectsUsedBy : includes indirect from `intermediate` rules", () => {
-  // Rules on an intermediate are evaluated only when the macro itself is
-  // checked. The introspection should still surface them — the matrix UI
-  // shows editors based on what the key declares, regardless of how a
-  // grant actually flows through.
-  const sys = createSystem({
-    schema: {
-      "expositions.participants.read": permission({
-        target: target.path("exposition", "participant"),
-      }).rules([]),
-      "expositions.participants.list": intermediate({
-        target: target.path("exposition", "participant"),
-        expandsTo: (g) => [{ ...g, key: "expositions.participants.read" }],
-      }).rules([membershipsOfParticipant.match()]),
-    },
-  });
-
-  assertEquals(
-    sys.indirectsUsedBy("expositions.participants.list").map((r) => r.id),
+    relationsUsedBy([participants], "expositions.participants.list"),
     ["memberships_of_participant"],
   );
 });

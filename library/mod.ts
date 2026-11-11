@@ -1,90 +1,93 @@
-/**
- * `@diister/quick-permission` — API publique.
- *
- * Expose une primitive unique `defineRule({ needs, check })` autour de
- * laquelle sont organisés les `Resource`, méthodes de sucre, et le moteur
- * d'orchestration avec dedup par contexte.
- *
- * Cf. `docs/rfc-resource-pipe-api.md` pour la motivation, les décisions
- * de design et le plan de migration.
- */
-
-// ─── Targets ─────────────────────────────────────────────────────────────
-export { seg, target } from "./target.ts";
-
-// ─── Core types ──────────────────────────────────────────────────────────
+export type { Condition } from "./condition.ts";
+export { implies } from "./condition.ts";
 export type {
-  AnySegment,
-  AnyTarget,
-  CanResult,
-  FetchCtx,
-  FilterContribution,
-  Grant,
-  IndirectResourceInfo,
-  ListEntry,
-  Permission,
-  Resource,
-  ResourceData,
-  ResourcesData,
-  Rule,
-  RuleDescriptor,
-  RuleResult,
-  SegmentSpec,
-  SerializableSegment,
-  SerializableTarget,
-  SpecToSegment,
+  Boundary,
+  BoundaryAnchor,
+  Delegation,
+  DelegationOptions,
+  DelegationRefusal,
+  Judged,
+  RefusalCode,
+  ReservedKeys,
+} from "./delegation.ts";
+export type {
+  ConditionContext,
+  Facts,
   Subject,
-  TargetArgs,
-  TargetNone,
-  TargetOptional,
-  TargetPath,
-  TargetRequired,
-  TreeNode,
-} from "./types.ts";
-
-// ─── Resource factory + sugar methods ────────────────────────────────────
-export { resource } from "./resource.ts";
-
-// ─── Indirect resource (JOIN-based, generates aggregation pipeline) ──────
-export { indirectResource } from "./indirect-resource.ts";
+} from "./engine/model.ts";
 export type {
-  IndirectResource,
-  IndirectResourceJoin,
-} from "./indirect-resource.ts";
-export type { AggregationStage } from "./indirect-aggregation.ts";
-
-// ─── defineRule + standalone helpers ─────────────────────────────────────
-export { defineRule, inputMatch, matchPath, requireSelf } from "./rules.ts";
-export type { DefineRuleOpts } from "./rules.ts";
-
-// ─── Permission builders ─────────────────────────────────────────────────
-export { intermediate, permission } from "./permission.ts";
-export type {
-  IntermediateBuilder,
-  IntermediateConfig,
-  PermissionBuilder,
-  PermissionConfig,
-} from "./permission.ts";
-
-// ─── System ──────────────────────────────────────────────────────────────
-export {
-  createSystem,
-  isCapabilityQuery,
-  isWildcardSegment,
-  refType,
-} from "./system.ts";
-export type {
-  CanContext,
   PermissionErrorEvent,
-  Provider,
-  ProviderAccess,
   ProviderFetchEvent,
-  ProviderFn,
+} from "./engine/providers.ts";
+export { entity } from "./entity.ts";
+export type {
+  AnyEntity,
+  ConditionSpec,
+  Entity,
+  EntityOptions,
+  GrantsOptions,
+  GrantsRequest,
+  Ownership,
+  OwnershipSpec,
+  RelationSpec,
+} from "./entity.ts";
+export type { FieldSelection } from "./fields.ts";
+export type {
+  Grant,
+  GrantProvider,
+  ProviderAccess,
+  ProviderFetch,
   ProviderObject,
+} from "./grant.ts";
+export {
+  ALL,
+  action,
+  bundle,
+  external,
+  globalPermissions,
+  list,
+  permissions,
+} from "./permissions.ts";
+export type {
+  ActionOptions,
+  AnyPermissionSet,
+  BundleOptions,
+  GrantOptions,
+  KeyInfo,
+  PermissionSet,
+  Where,
+} from "./permissions.ts";
+export type { RefConvention } from "./refs.ts";
+export { typedRefs } from "./refs.ts";
+export { defineRule } from "./rule.ts";
+export type { CustomRule, RuleContext, RuleVerdict } from "./rule.ts";
+export { memory } from "./storage/memory.ts";
+export type { MemoryQuery, Related } from "./storage/memory.ts";
+export { mongo } from "./storage/mongo.ts";
+export type {
+  MongoFilter,
+  MongoOptions,
+  MongoQuery,
+  MongoStage,
+} from "./storage/mongo.ts";
+export type {
+  Alternative,
+  Plan,
+  RelationInfo,
+  StorageAdapter,
+  Through,
+} from "./storage/plan.ts";
+export { compilePermissions, createSystem } from "./system.ts";
+export type {
+  CatalogEntry,
+  CheckOptions,
+  CheckResult,
+  Compiled,
+  Context,
+  GrantRejection,
+  Hooks,
+  Reach,
+  ScopeResult,
   System,
-  SystemHooks,
+  TypesOf,
 } from "./system.ts";
-
-// ─── Field-projection helpers (used outside permission checks too) ───────
-export { applyFilter, pickFields } from "./core/filtering.ts";
-export type { FilterSpec } from "./core/merging.ts";

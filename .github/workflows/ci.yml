@@ -134,7 +134,7 @@ jobs:
         run: |
           cat > check.js <<'EOF'
           import * as qp from "@diister/quick-permission";
-          for (const name of ["createSystem", "permission", "resource"]) {
+          for (const name of ["createSystem", "entity", "permissions"]) {
             if (typeof qp[name] !== "function") {
               throw new Error(`${name} did not load`);
             }

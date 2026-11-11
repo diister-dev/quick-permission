@@ -1,390 +1,294 @@
 import { test } from "node:test";
-import { assert, assertEquals } from "./+assert.ts";
 import {
+  ALL,
+  action,
   createSystem,
-  matchPath,
-  type PermissionErrorEvent,
-  permission,
-  resource,
-  target,
+  entity,
+  type Grant,
+  type GrantRejection,
+  permissions,
 } from "../mod.ts";
+import { assert, assertEquals } from "./+assert.ts";
 
-const userOf = resource({
-  id: "user",
-  fetch: ({ target }) => ({
-    _id: target[0] as string,
-    role: target[0] === "user:lucas" ? "editor" : "admin",
-    orgId: target[0] === "user:lucas" ? "org:b" : "org:a",
-  }),
-  dedupKey: ({ target }) => target[0] as string,
-});
+type UserDoc = {
+  readonly _id: string;
+  readonly role: string;
+  readonly orgId: string;
+};
 
-test("constraints: single matched grant → constraint exposed as-is", async () => {
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        userOf.match(),
-      ]),
-    },
+type RatedUserDoc = {
+  readonly _id: string;
+  readonly status: string;
+  readonly role: string;
+};
+
+type StatusDoc = { readonly _id: string; readonly status: string };
+
+function usersOf(load: (id: string) => UserDoc) {
+  const user = entity("user", { load });
+  return permissions(user, "users", { read: action() });
+}
+
+function lucasOrAdmin(id: string): UserDoc {
+  return {
+    _id: id,
+    role: id === "user:lucas" ? "editor" : "admin",
+    orgId: id === "user:lucas" ? "org:b" : "org:a",
+  };
+}
+
+test("constraints: single matched grant exposes its condition as-is", async () => {
+  const users = usersOf(lucasOrAdmin);
+  const system = createSystem({
+    permissions: [users],
     providers: [
       () => [
-        {
-          id: "g",
-          key: "users.read",
-          target: ["user:*"],
-          with: { user: { role: "editor" } },
-        },
+        users.grant("read", { id: "g", on: ALL, where: { role: "editor" } }),
       ],
     ],
   });
-  const r = await sys
-    .context({ subject: { id: "s" } })
-    .can("users.read", ["user:lucas"]);
-  assertEquals(r.ok, true);
-  if (r.ok) assertEquals(r.constraints, { role: "editor" });
+  const ctx = system.context({ subject: { id: "s" } });
+  const result = await ctx.check("users.read", "user:lucas");
+  assert(result.ok);
+  assertEquals(result.grants, ["g"]);
+  const scope = await ctx.scope("users.read");
+  assert(scope.ok);
+  assertEquals(scope.query, { filter: { role: "editor" }, stages: null });
 });
 
-test("constraints: multiple matched grants → $or", async () => {
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        userOf.match(),
-      ]),
-    },
+test("constraints: multiple matched grants become $or", async () => {
+  const users = usersOf(lucasOrAdmin);
+  const system = createSystem({
+    permissions: [users],
     providers: [
       () => [
-        {
-          id: "g1",
-          key: "users.read",
-          target: ["user:*"],
-          with: { user: { role: "editor" } },
-        },
-        {
-          id: "g2",
-          key: "users.read",
-          target: ["user:*"],
-          with: { user: { orgId: "org:b" } },
-        },
+        users.grant("read", { id: "g1", on: ALL, where: { role: "editor" } }),
+        users.grant("read", { id: "g2", on: ALL, where: { orgId: "org:b" } }),
       ],
     ],
   });
-  const r = await sys
-    .context({ subject: { id: "s" } })
-    .can("users.read", ["user:lucas"]);
-  assertEquals(r.ok, true);
-  if (r.ok) {
-    assertEquals(r.constraints, {
-      $or: [{ role: "editor" }, { orgId: "org:b" }],
-    });
-  }
+  const ctx = system.context({ subject: { id: "s" } });
+  const result = await ctx.check("users.read", "user:lucas");
+  assert(result.ok);
+  const scope = await ctx.scope("users.read");
+  assert(scope.ok);
+  assertEquals(scope.query, {
+    filter: { $or: [{ role: "editor" }, { orgId: "org:b" }] },
+    stages: null,
+  });
 });
 
-test("constraints: grant without spec collapses union to {} (any)", async () => {
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        userOf.match(),
-      ]),
-    },
+test("constraints: a grant without condition collapses the union to all rows", async () => {
+  const users = usersOf(lucasOrAdmin);
+  const system = createSystem({
+    permissions: [users],
     providers: [
       () => [
-        {
+        users.grant("read", {
           id: "scoped",
-          key: "users.read",
-          target: ["user:*"],
-          with: { user: { role: "editor" } },
-        },
-        { id: "open", key: "users.read", target: ["user:*"] },
+          on: ALL,
+          where: { role: "editor" },
+        }),
+        users.grant("read", { id: "open", on: ALL }),
       ],
     ],
   });
-  const r = await sys
-    .context({ subject: { id: "s" } })
-    .can("users.read", ["user:lucas"]);
-  assertEquals(r.ok, true);
-  if (r.ok) assertEquals(r.constraints, {});
+  const ctx = system.context({ subject: { id: "s" } });
+  const result = await ctx.check("users.read", "user:lucas");
+  assert(result.ok);
+  const scope = await ctx.scope("users.read");
+  assert(scope.ok);
+  assertEquals(scope.query, { filter: {}, stages: null });
 });
 
-test("constraints: capability mode returns union without fetching", async () => {
-  let fetches = 0;
-  const u = resource({
-    id: "user",
-    fetch: () => {
-      fetches++;
-      return { _id: "should-not-be-called" };
-    },
-    dedupKey: ({ target }) => target[0] as string,
+test("constraints: a capability question returns the union without loading", async () => {
+  let loads = 0;
+  const users = usersOf((id) => {
+    loads++;
+    return { _id: id, role: "none", orgId: "none" };
   });
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        u.match(),
-      ]),
-    },
+  const system = createSystem({
+    permissions: [users],
     providers: [
       () => [
-        {
+        users.grant("read", {
           id: "g1",
-          key: "users.read",
-          target: ["user:*"],
-          with: { user: { _id: "user:lucas" } },
-        },
-        {
-          id: "g2",
-          key: "users.read",
-          target: ["user:*"],
-          with: { user: { orgId: "org:b" } },
-        },
+          on: ALL,
+          where: { _id: "user:lucas" },
+        }),
+        users.grant("read", { id: "g2", on: ALL, where: { orgId: "org:b" } }),
       ],
     ],
   });
-  const r = await sys
-    .context({ subject: { id: "s" } })
-    .can("users.read", ["user:*"]);
-  assertEquals(r.ok, true);
-  assertEquals(fetches, 0);
-  if (r.ok) {
-    assertEquals(r.constraints, {
-      $or: [{ _id: "user:lucas" }, { orgId: "org:b" }],
-    });
-  }
+  const ctx = system.context({ subject: { id: "s" } });
+  const scope = await ctx.scope("users.read");
+  assert(scope.ok);
+  assertEquals(loads, 0);
+  assertEquals(scope.query, {
+    filter: { $or: [{ _id: "user:lucas" }, { orgId: "org:b" }] },
+    stages: null,
+  });
 });
 
 test("constraints: $ne / $in operators carried through", async () => {
-  const u = resource({
-    id: "user",
-    fetch: ({ target }) => ({
-      _id: target[0] as string,
-      status: target[0] === "user:lucas" ? "active" : "external",
-      role: target[0] === "user:lucas" ? "editor" : "viewer",
+  const user = entity("user", {
+    load: (id): RatedUserDoc => ({
+      _id: id,
+      status: id === "user:lucas" ? "active" : "external",
+      role: id === "user:lucas" ? "editor" : "viewer",
     }),
-    dedupKey: ({ target }) => target[0] as string,
   });
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        u.match(),
-      ]),
-    },
+  const users = permissions(user, "users", { read: action() });
+  const system = createSystem({
+    permissions: [users],
     providers: [
       () => [
-        {
+        users.grant("read", {
           id: "g",
-          key: "users.read",
-          target: ["user:*"],
-          with: {
-            user: {
-              status: { $ne: "external" },
-              role: { $in: ["editor", "admin"] },
-            },
+          on: ALL,
+          where: {
+            status: { $ne: "external" },
+            role: { $in: ["editor", "admin"] },
           },
-        },
+        }),
       ],
     ],
   });
-  // Lucas: passes both ($ne external + role in editor/admin)
-  const ok = await sys
-    .context({ subject: { id: "s" } })
-    .can("users.read", ["user:lucas"]);
-  assertEquals(ok.ok, true);
-  if (ok.ok) {
-    assertEquals(ok.constraints, {
+  const ctx = system.context({ subject: { id: "s" } });
+  const ok = await ctx.check("users.read", "user:lucas");
+  assert(ok.ok);
+  const scope = await ctx.scope("users.read");
+  assert(scope.ok);
+  assertEquals(scope.query, {
+    filter: {
       status: { $ne: "external" },
       role: { $in: ["editor", "admin"] },
-    });
-  }
-
-  // Other user: fails
-  const ko = await sys
-    .context({ subject: { id: "s" } })
-    .can("users.read", ["user:other"]);
+    },
+    stages: null,
+  });
+  const ko = await ctx.check("users.read", "user:other");
   assertEquals(ko.ok, false);
 });
 
-test("matchPath: translates target-only grant to {_id: target[0]}", async () => {
-  const u = resource({
-    id: "user",
-    fetch: ({ target }) => ({ _id: target[0] as string }),
-    dedupKey: ({ target }) => target[0] as string,
+test("target: a grant on one instance becomes {_id: target[0]}", async () => {
+  const user = entity("user", { load: (id): { _id: string } => ({ _id: id }) });
+  const users = permissions(user, "users", { read: action() });
+  const system = createSystem({
+    permissions: [users],
+    providers: [() => [users.grant("read", { id: "g", on: "user:lucas" })]],
   });
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        u.match(),
-        matchPath(),
-      ]),
-    },
-    providers: [() => [{ id: "g", key: "users.read", target: ["user:lucas"] }]],
-  });
-  const r = await sys
+  const scope = await system
     .context({ subject: { id: "s" } })
-    .can("users.read", ["user:*"]);
-  assertEquals(r.ok, true);
-  if (r.ok) assertEquals(r.constraints, { _id: "user:lucas" });
+    .scope("users.read");
+  assert(scope.ok);
+  assertEquals(scope.query, { filter: { _id: "user:lucas" }, stages: null });
 });
 
-test("matchPath: combines with grant.with via AND inside the same grant", async () => {
-  const u = resource({
-    id: "user",
-    fetch: ({ target }) => ({
-      _id: target[0] as string,
-      status: "active",
-    }),
-    dedupKey: ({ target }) => target[0] as string,
+test("target: combines with the grant condition via AND inside the same grant", async () => {
+  const user = entity("user", {
+    load: (id): StatusDoc => ({ _id: id, status: "active" }),
   });
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        u.match(),
-        matchPath(),
-      ]),
-    },
+  const users = permissions(user, "users", { read: action() });
+  const system = createSystem({
+    permissions: [users],
     providers: [
       () => [
-        {
+        users.grant("read", {
           id: "g",
-          key: "users.read",
-          target: ["user:lucas"],
-          with: { user: { status: "active" } },
-        },
+          on: "user:lucas",
+          where: { status: "active" },
+        }),
       ],
     ],
   });
-  const r = await sys
+  const scope = await system
     .context({ subject: { id: "s" } })
-    .can("users.read", ["user:*"]);
-  assertEquals(r.ok, true);
-  if (r.ok) {
-    assertEquals(r.constraints, {
-      $and: [{ status: "active" }, { _id: "user:lucas" }],
-    });
-  }
+    .scope("users.read");
+  assert(scope.ok);
+  assertEquals(scope.query, {
+    filter: { $and: [{ status: "active" }, { _id: "user:lucas" }] },
+    stages: null,
+  });
 });
 
-test("matchPath: wildcard target emits no constraint", async () => {
-  const u = resource({
-    id: "user",
-    fetch: ({ target }) => ({ _id: target[0] as string }),
-    dedupKey: ({ target }) => target[0] as string,
+test("target: a wildcard target emits no constraint", async () => {
+  const user = entity("user", { load: (id): { _id: string } => ({ _id: id }) });
+  const users = permissions(user, "users", { read: action() });
+  const system = createSystem({
+    permissions: [users],
+    providers: [() => [users.grant("read", { id: "admin", on: ALL })]],
   });
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        u.match(),
-        matchPath(),
-      ]),
-    },
-    providers: [() => [{ id: "admin", key: "users.read", target: ["user:*"] }]],
-  });
-  const r = await sys
+  const scope = await system
     .context({ subject: { id: "s" } })
-    .can("users.read", ["user:*"]);
-  assertEquals(r.ok, true);
-  if (r.ok) assertEquals(r.constraints, {});
+    .scope("users.read");
+  assert(scope.ok);
+  assertEquals(scope.query, { filter: {}, stages: null });
 });
 
-test("matchPath: custom field + segment for path resources", async () => {
-  const sys = createSystem({
-    schema: {
-      "expo.badges.read": permission({
-        target: target.path("exposition", "badge"),
-      }).rules([
-        // For a sub-resource: target[1] = badgeId, _id of the badge sub-doc.
-        matchPath({ segment: 1 }),
-      ]),
-    },
+test("target: a child entity is constrained by its own segment", async () => {
+  const exposition = entity("exposition", { refType: "expo" });
+  const badge = exposition.child("badge", {});
+  const badges = permissions(badge, "expo.badges", { read: action() });
+  const system = createSystem({
+    permissions: [badges],
     providers: [
-      () => [
-        { id: "g", key: "expo.badges.read", target: ["expo:e1", "badge:b42"] },
-      ],
+      () => [badges.grant("read", { id: "g", on: ["expo:e1", "badge:b42"] })],
     ],
   });
-  const r = await sys
+  const scope = await system
     .context({ subject: { id: "s" } })
-    .can("expo.badges.read", ["expo:e1", "badge:*"]);
-  assertEquals(r.ok, true);
-  if (r.ok) assertEquals(r.constraints, { _id: "badge:b42" });
+    .scope("expo.badges.read", "expo:e1");
+  assert(scope.ok);
+  assertEquals(scope.query, { filter: { _id: "badge:b42" }, stages: null });
 });
 
-test("constraints: multiple match rules AND-merged within a grant", async () => {
-  const expoOf = resource({
-    id: "exposition",
-    fetch: ({ target }) => ({ _id: target[0] as string, status: "active" }),
-    dedupKey: ({ target }) => target[0] as string,
+test("constraints: conditions on the parent and the entity AND-merged within a grant", async () => {
+  const exposition = entity("exposition", {
+    load: (id): StatusDoc => ({ _id: id, status: "active" }),
   });
-  const badgeOf = resource({
-    id: "badge",
-    fetch: ({ target }) => ({ _id: target[1] as string, status: "active" }),
-    dedupKey: ({ target }) => `${target[0]}::${target[1]}`,
+  const badge = exposition.child("badge", {
+    load: (_expositionId, id): StatusDoc => ({ _id: id, status: "active" }),
   });
-  const sys = createSystem({
-    schema: {
-      "expositions.badges.read": permission({
-        target: target.path("exposition", "badge"),
-      }).rules([expoOf.match(), badgeOf.match()]),
-    },
+  const badges = permissions(badge, "expositions.badges", { read: action() });
+  const system = createSystem({
+    permissions: [badges],
     providers: [
       () => [
-        {
+        badges.grant("read", {
           id: "g",
-          key: "expositions.badges.read",
-          target: ["exposition:e1", "badge:*"],
-          with: {
-            exposition: { _id: "exposition:e1" },
-            badge: { status: "active" },
-          },
-        },
+          on: ["exposition:e1", ALL],
+          parents: { exposition: { _id: "exposition:e1" } },
+          where: { status: "active" },
+        }),
       ],
     ],
   });
-  const r = await sys
+  const scope = await system
     .context({ subject: { id: "s" } })
-    .can("expositions.badges.read", ["exposition:e1", "badge:*"]);
-  assertEquals(r.ok, true);
-  if (r.ok) {
-    // `expoOf` is auto-bound to segment 0 (id === "exposition" matches
-    // target.path's first segment name). In cap-mode with a concrete
-    // target[0]="exposition:e1", the engine fetches the exposition doc
-    // and `match.exposition` evaluates the spec normally (without
-    // emitting its constraint into the final pushdown — the check is
-    // already resolved).
-    // `badgeOf` is auto-bound to segment 1, but target[1]="badge:*" is
-    // wildcard → legacy silent-pass + emit `{ status: "active" }`.
-    assertEquals(r.constraints, { status: "active" });
-  }
+    .scope("expositions.badges.read", "exposition:e1");
+  assert(scope.ok);
+  assertEquals(scope.query, { filter: { status: "active" }, stages: null });
 });
 
 test("constraints: $where operator rejected by whitelist", async () => {
-  const u = resource({
-    id: "user",
-    fetch: () => ({ _id: "u" }),
-    dedupKey: ({ target }) => target[0] as string,
+  const user = entity("user", { load: (): { _id: string } => ({ _id: "u" }) });
+  const users = permissions(user, "users", { read: action() });
+  const rejections: GrantRejection[] = [];
+  const held: Grant = {
+    id: "g",
+    key: "users.read",
+    on: ["user:*"],
+    where: { $where: "function() { return true }" },
+  };
+  const system = createSystem({
+    permissions: [users],
+    providers: [() => [held]],
+    hooks: { onGrantRejected: (event) => rejections.push(event) },
   });
-  const errors: PermissionErrorEvent[] = [];
-  const sys = createSystem({
-    hooks: { onError: (event) => errors.push(event) },
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        u.match(),
-      ]),
-    },
-    providers: [
-      () => [
-        {
-          id: "g",
-          key: "users.read",
-          target: ["user:*"],
-          // deno-lint-ignore no-explicit-any
-          with: { user: { $where: "function() { return true }" } as any },
-        },
-      ],
-    ],
-  });
-  const result = await sys
+  const result = await system
     .context({ subject: { id: "s" } })
-    .can("users.read", ["user:1"]);
+    .check("users.read", "user:1");
   assertEquals(result.ok, false);
-  assert(!result.ok && result.reasons.some((r) => r.includes("$where")));
-  assertEquals(errors.length, 1);
-  assertEquals(errors[0].source, "rule");
+  assertEquals(rejections.length, 1);
+  assert(rejections[0].reason.includes("$where"));
 });

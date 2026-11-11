@@ -1,239 +1,184 @@
 import { test } from "node:test";
+import {
+  ALL,
+  action,
+  createSystem,
+  defineRule,
+  entity,
+  permissions,
+} from "../mod.ts";
 import { assertEquals } from "./+assert.ts";
-import { createSystem, permission, resource, target } from "../mod.ts";
 
-test("dedup intra-grant : 2 rules sur la même resource = 1 fetch", async () => {
+type UserDoc = { readonly _id: string; readonly roles?: readonly string[] };
+
+test("dedup within a grant: two rules on the same document load it once", async () => {
   let fetches = 0;
-  const userOf = resource({
-    id: "user",
-    fetch: () => {
+  const user = entity<UserDoc>("user", {
+    load: () => {
       fetches++;
       return { _id: "user:abc", roles: ["role:editor"] };
     },
-    dedupKey: ({ target }) => target[0] as string,
   });
-
+  const users = permissions(user, "users", {
+    update: action({ fields: "doc" }),
+  });
   const sys = createSystem({
-    schema: {
-      "users.update": permission({ target: target.required("user") }).rules([
-        userOf.match(),
-        userOf.filter(),
-      ]),
-    },
-    providers: [() => [{ key: "users.update", target: ["user:*"] }]],
+    permissions: [users],
+    providers: [() => [users.grant("update", { on: ALL })]],
   });
 
   await sys
     .context({ subject: { id: "user:1" } })
-    .can("users.update", ["user:abc"]);
+    .check("users.update", "user:abc");
   assertEquals(fetches, 1);
 });
 
-test("dedup inter-grant : 5 grants sur le même target = 1 fetch", async () => {
+test("dedup across grants: 5 grants on the same target load it once", async () => {
   let fetches = 0;
-  const userOf = resource({
-    id: "user",
-    fetch: () => {
+  const user = entity<UserDoc>("user", {
+    load: () => {
       fetches++;
       return { _id: "user:abc", roles: ["role:editor"] };
     },
-    dedupKey: ({ target }) => target[0] as string,
   });
-
+  const users = permissions(user, "users", {
+    update: action({ fields: "doc" }),
+  });
   const sys = createSystem({
-    schema: {
-      "users.update": permission({ target: target.required("user") }).rules([
-        userOf.match(),
-        userOf.filter(),
-      ]),
-    },
+    permissions: [users],
     providers: [
       () => [
-        { id: "g1", key: "users.update", target: ["user:*"] },
-        { id: "g2", key: "users.update", target: ["user:*"] },
-        { id: "g3", key: "users.update", target: ["user:*"] },
-        { id: "g4", key: "users.update", target: ["user:*"] },
-        { id: "g5", key: "users.update", target: ["user:*"] },
+        users.grant("update", { id: "g1", on: ALL }),
+        users.grant("update", { id: "g2", on: ALL }),
+        users.grant("update", { id: "g3", on: ALL }),
+        users.grant("update", { id: "g4", on: ALL }),
+        users.grant("update", { id: "g5", on: ALL }),
       ],
     ],
   });
 
   const ctx = sys.context({ subject: { id: "user:1" } });
-  await ctx.can("users.update", ["user:abc"]);
+  await ctx.check("users.update", "user:abc");
   assertEquals(fetches, 1);
-  assertEquals(ctx.getFetchCounters(), { user: 1 });
+  assertEquals(ctx.fetchCounters(), { user: 1 });
 });
 
-test("dedup cross-permission : read puis update sur même target = 1 fetch", async () => {
+test("dedup across keys: read then update on the same target load it once", async () => {
   let fetches = 0;
-  const userOf = resource({
-    id: "user",
-    fetch: () => {
+  const user = entity<UserDoc>("user", {
+    load: () => {
       fetches++;
       return { _id: "user:abc" };
     },
-    dedupKey: ({ target }) => target[0] as string,
   });
-
+  const users = permissions(user, "users", {
+    read: action({ fields: "doc" }),
+    update: action({ fields: "doc" }),
+  });
   const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        userOf.match(),
-        userOf.filter(),
-      ]),
-      "users.update": permission({ target: target.required("user") }).rules([
-        userOf.match(),
-        userOf.filter(),
-      ]),
-    },
-    providers: [(_s, k) => [{ key: k, target: ["user:*"] }]],
+    permissions: [users],
+    providers: [(_s, key) => [{ key, on: ["user:*"] }]],
   });
 
   const ctx = sys.context({ subject: { id: "user:1" } });
-  await ctx.can("users.read", ["user:abc"]);
-  await ctx.can("users.update", ["user:abc"]);
+  await ctx.check("users.read", "user:abc");
+  await ctx.check("users.update", "user:abc");
   assertEquals(fetches, 1);
 });
 
-test("dedup partiel sur target path : expo=1, program=1, registration=2", async () => {
+test("partial dedup on a path: exposition=1, program=1, registration=2", async () => {
   let expoFetches = 0;
   let programFetches = 0;
   let regFetches = 0;
 
-  const expoOf = resource({
-    id: "exposition",
-    fetch: () => {
+  const exposition = entity<{ readonly _id: string }>("exposition", {
+    load: () => {
       expoFetches++;
       return { _id: "exposition:e1" };
     },
-    dedupKey: ({ target }) => target[0] as string,
   });
-  const programOf = resource({
-    id: "program",
-    fetch: () => {
+  const program = exposition.child<{ readonly _id: string }>("program", {
+    load: () => {
       programFetches++;
       return { _id: "program:p7" };
     },
-    dedupKey: ({ target }) => `${target[0]}::${target[1]}`,
   });
-  const regOf = resource({
-    id: "registration",
-    fetch: () => {
+  const registration = program.child<{ readonly _id: string }>("registration", {
+    load: () => {
       regFetches++;
       return { _id: "registration:??" };
     },
-    dedupKey: ({ target }) => `${target[0]}::${target[1]}::${target[2]}`,
+  });
+  const registrations = permissions(registration, "registrations", {
+    read: action({ fields: "doc" }),
   });
 
   const sys = createSystem({
-    schema: {
-      "registrations.read": permission({
-        target: target.path("exposition", "program", "registration"),
-      }).rules([
-        expoOf.match(),
-        programOf.match(),
-        regOf.match(),
-        regOf.filter(),
-      ]),
-    },
+    permissions: [registrations],
     providers: [
       () => [
-        {
-          key: "registrations.read",
-          target: ["exposition:*", "program:*", "registration:*"],
-          with: {
+        registrations.grant("read", {
+          on: ALL,
+          parents: {
             exposition: { _id: "exposition:e1" },
             program: { _id: "program:p7" },
           },
-        },
+        }),
       ],
     ],
   });
 
   const ctx = sys.context({ subject: { id: "user:1" } });
-  await ctx.can("registrations.read", [
+  await ctx.check(
+    "registrations.read",
     "exposition:e1",
     "program:p7",
     "registration:r1",
-  ]);
-  await ctx.can("registrations.read", [
+  );
+  await ctx.check(
+    "registrations.read",
     "exposition:e1",
     "program:p7",
     "registration:r2",
-  ]);
+  );
 
   assertEquals(expoFetches, 1);
   assertEquals(programFetches, 1);
   assertEquals(regFetches, 2);
 });
 
-test("activeWhen sur resource : skip fetch si aucun grant n'active la rule", async () => {
+test("a document read only by a rule no grant switches on is never loaded", async () => {
   let fetches = 0;
-  const userOf = resource({
-    id: "user",
-    fetch: () => ({ _id: "user:abc", roles: ["role:viewer"] }),
-    dedupKey: ({ target }) => target[0] as string,
+  const user = entity<UserDoc>("user", {
+    load: () => ({ _id: "user:abc", roles: ["role:viewer"] }),
   });
-  const userMembershipsOf = resource({
-    id: "user-memberships",
-    fetch: () => {
-      fetches++;
-      return [{ tenantId: "entreprise:A" }];
+  const loadMemberships = async (): Promise<
+    readonly { readonly tenantId: string }[]
+  > => {
+    fetches++;
+    return [{ tenantId: "entreprise:A" }];
+  };
+  const requiresEntreprise = defineRule({
+    name: "includes",
+    when: "requiresEntreprise",
+    async check() {
+      const memberships = await loadMemberships();
+      return memberships.some(
+        (membership) => membership.tenantId === "entreprise:A",
+      );
     },
-    activeWhen: (grant) => grant.flags?.requiresEntreprise === true,
-    dedupKey: ({ target }) => target[0] as string,
+  });
+  const users = permissions(user, "users", {
+    update: action({ rules: [requiresEntreprise] }),
   });
 
   const sys = createSystem({
-    schema: {
-      "users.update": permission({ target: target.required("user") }).rules([
-        userOf.match(),
-        userMembershipsOf.includes("requiredEntreprise", (m) =>
-          m.map((x) => x.tenantId),
-        ),
-      ]),
-    },
-    providers: [
-      () => [
-        // Grant sans flag → userMembershipsOf NE doit PAS être fetché
-        { id: "g-admin", key: "users.update", target: ["user:*"] },
-      ],
-    ],
+    permissions: [users],
+    providers: [() => [users.grant("update", { id: "g-admin", on: ALL })]],
   });
 
   await sys
     .context({ subject: { id: "user:1" } })
-    .can("users.update", ["user:abc"]);
+    .check("users.update", "user:abc");
   assertEquals(fetches, 0);
-});
-
-test("compteurs de fetches reset via clearCounters", async () => {
-  const userOf = resource({
-    id: "user",
-    fetch: () => ({ _id: "user:abc" }),
-    dedupKey: ({ target }) => target[0] as string,
-  });
-
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        userOf.match(),
-      ]),
-    },
-    providers: [
-      () => [
-        {
-          key: "users.read",
-          target: ["user:*"],
-          with: { user: { _id: "user:abc" } },
-        },
-      ],
-    ],
-  });
-
-  const ctx = sys.context({ subject: { id: "user:1" } });
-  await ctx.can("users.read", ["user:abc"]);
-  assertEquals(ctx.getFetchCounters(), { user: 1 });
-  ctx.clearCounters();
-  assertEquals(ctx.getFetchCounters(), {});
 });

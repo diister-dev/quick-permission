@@ -1,44 +1,44 @@
 import { test } from "node:test";
-import { assertEquals, assertRejects } from "./+assert.ts";
 import {
+  ALL,
+  action,
+  bundle,
   createSystem,
-  type Grant,
-  intermediate,
-  permission,
-  type Provider,
-  target,
+  entity,
+  type GrantProvider,
+  permissions,
 } from "../mod.ts";
+import { assertEquals, assertRejects } from "./+assert.ts";
 
 const subject = { id: "user:u1" };
 
-const schema = {
-  "posts.read": permission({ target: target.required("post") }).rules([]),
-  "posts.manage": intermediate({
-    target: target.required("post"),
-    expandsTo: (g: Grant) => [{ ...g, key: "posts.read" }],
-  }).rules([]),
-};
+const post = entity("post", {});
+
+const posts = permissions(post, "posts", {
+  read: action(),
+  manage: bundle(["read"]),
+});
 
 test("providers are consulted together, not one after another", async () => {
   let inFlight = 0;
   let peak = 0;
-  const slow = (id: string): Provider => ({
+  const slow = (id: string): GrantProvider => ({
     name: id,
     fetch: async () => {
       inFlight++;
       peak = Math.max(peak, inFlight);
-      await new Promise((r) => setTimeout(r, 5));
+      await new Promise((resolve) => setTimeout(resolve, 5));
       inFlight--;
-      return [{ id, key: "posts.read", target: ["post:*"] }];
+      return [posts.grant("read", { id, on: ALL })];
     },
   });
   const sys = createSystem({
-    schema,
+    permissions: [posts],
     providers: [slow("a"), slow("b"), slow("c"), slow("d")],
   });
-  assertEquals(await sys.can(subject, "posts.read", ["post:1"]), {
+  assertEquals(await sys.context({ subject }).check("posts.read", "post:1"), {
     ok: true,
-    matchedGrants: ["a", "b", "c", "d"],
+    grants: ["a", "b", "c", "d"],
   });
   assertEquals(peak, 4);
 });
@@ -46,7 +46,7 @@ test("providers are consulted together, not one after another", async () => {
 test("a provider skipped by key or target type is never called", async () => {
   const calls: string[] = [];
   const sys = createSystem({
-    schema,
+    permissions: [posts],
     providers: [
       {
         name: "other-keys",
@@ -66,17 +66,20 @@ test("a provider skipped by key or target type is never called", async () => {
       },
       () => {
         calls.push("all");
-        return [{ key: "posts.read", target: ["post:*"] }];
+        return [posts.grant("read", { on: ALL })];
       },
     ],
   });
-  assertEquals((await sys.can(subject, "posts.read", ["post:1"])).ok, true);
+  assertEquals(
+    (await sys.context({ subject }).check("posts.read", "post:1")).ok,
+    true,
+  );
   assertEquals(calls, ["all"]);
 });
 
 test("a throwing key matcher still rejects the check", async () => {
   const sys = createSystem({
-    schema,
+    permissions: [posts],
     providers: [
       {
         matches: () => {
@@ -86,29 +89,31 @@ test("a throwing key matcher still rejects the check", async () => {
       },
     ],
   });
-  await assertRejects(() => sys.can(subject, "posts.read", ["post:1"]));
+  await assertRejects(() =>
+    sys.context({ subject }).check("posts.read", "post:1"),
+  );
 });
 
 test("a cached provider result is expanded once per context", async () => {
   let expansions = 0;
   let fetches = 0;
+  const counted = permissions(post, "posts", {
+    read: action(),
+    manage: bundle([], {
+      expand: (grant) => {
+        expansions++;
+        return [{ ...grant, key: "posts.read" }];
+      },
+    }),
+  });
   const sys = createSystem({
-    schema: {
-      "posts.read": permission({ target: target.required("post") }).rules([]),
-      "posts.manage": intermediate({
-        target: target.required("post"),
-        expandsTo: (g: Grant) => {
-          expansions++;
-          return [{ ...g, key: "posts.read" }];
-        },
-      }).rules([]),
-    },
+    permissions: [counted],
     providers: [
       {
         cacheKey: () => "all",
         fetch: () => {
           fetches++;
-          return [{ id: "m", key: "posts.manage", target: ["post:*"] }];
+          return [counted.grant("manage", { id: "m", on: ALL })];
         },
       },
     ],
@@ -116,36 +121,14 @@ test("a cached provider result is expanded once per context", async () => {
   const ctx = sys.context({ subject });
   const baseline = expansions;
   for (let i = 0; i < 20; i++) {
-    assertEquals((await ctx.can("posts.read", [`post:${i}`])).ok, true);
-    assertEquals((await ctx.can("posts.manage", [`post:${i}`])).ok, true);
+    assertEquals((await ctx.check("posts.read", `post:${i}`)).ok, true);
+    assertEquals((await ctx.check("posts.manage", `post:${i}`)).ok, true);
   }
   assertEquals(fetches, 1);
   assertEquals(expansions - baseline, 1);
 
   const other = sys.context({ subject });
-  await other.can("posts.read", ["post:1"]);
+  await other.check("posts.read", "post:1");
   assertEquals(fetches, 2);
   assertEquals(expansions - baseline, 2);
-});
-
-test("a cached array that grows in place is expanded again", async () => {
-  const grants: Grant[] = [
-    { id: "first", key: "posts.read", target: ["post:1"] },
-  ];
-  const sys = createSystem({
-    schema,
-    providers: [{ cacheKey: () => "all", fetch: () => grants }],
-  });
-  const ctx = sys.context({ subject });
-  assertEquals((await ctx.can("posts.read", ["post:2"])).ok, false);
-  grants.push({ id: "second", key: "posts.manage", target: ["post:2"] });
-  assertEquals(await ctx.can("posts.read", ["post:2"]), {
-    ok: true,
-    matchedGrants: ["second"],
-  });
-  grants[0] = { id: "replaced", key: "posts.read", target: ["post:2"] };
-  assertEquals(await ctx.can("posts.read", ["post:2"]), {
-    ok: true,
-    matchedGrants: ["replaced", "second"],
-  });
 });

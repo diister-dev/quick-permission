@@ -18,5 +18,14 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "include": ["mod.ts", "core", "sift", "next", "*.ts", "test", "scripts"]
+  "include": [
+    "mod.ts",
+    "storage",
+    "engine",
+    "examples",
+    "sift",
+    "*.ts",
+    "test",
+    "scripts"
+  ]
 }

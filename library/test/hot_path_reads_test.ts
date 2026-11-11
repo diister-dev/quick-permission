@@ -1,197 +1,184 @@
 import { test } from "node:test";
-import { assertEquals } from "./+assert.ts";
 import {
+  ALL,
+  action,
   createSystem,
   defineRule,
+  entity,
   type Grant,
-  indirectResource,
-  permission,
-  resource,
-  target,
+  permissions,
 } from "../mod.ts";
+import { assertEquals } from "./+assert.ts";
 
 const subject = { id: "user:u1" };
 
-const orgOf = resource({
-  id: "org",
-  fetch: ({ target }) => ({ _id: target[0], status: "active" }),
-  dedupKey: ({ target }) => target[0] as string,
-});
+type OrgDoc = { readonly _id: string; readonly status: string };
 
-test("a match rule reads its resource only for a grant that carries a spec", async () => {
-  const make = (grants: readonly Grant[]) =>
-    createSystem({
-      schema: {
-        "orgs.read": permission({ target: target.required("org") }).rules([
-          orgOf.match(),
-        ]),
-      },
-      providers: [() => grants],
-    });
-
-  const open = make([{ key: "orgs.read", target: ["org:*"] }]).context({
-    subject,
+function orgEntity(options: { readonly verifyExists?: boolean } = {}) {
+  const org = entity<OrgDoc>("org", {
+    load: (id) => ({ _id: id, status: "active" }),
+    ...options,
   });
-  for (let i = 0; i < 10; i++) await open.can("orgs.read", [`org:${i}`]);
-  assertEquals(open.getFetchCounters(), {});
+  return permissions(org, "orgs", { read: action() });
+}
+
+test("a match rule reads its document only for a grant that carries a condition", async () => {
+  const orgs = orgEntity();
+  const make = (grants: readonly Grant[]) =>
+    createSystem({ permissions: [orgs], providers: [() => grants] });
+
+  const open = make([orgs.grant("read", { on: ALL })]).context({ subject });
+  for (let i = 0; i < 10; i++) await open.check("orgs.read", `org:${i}`);
+  assertEquals(open.fetchCounters(), {});
 
   const scoped = make([
-    {
-      key: "orgs.read",
-      target: ["org:*"],
-      with: { org: { status: "active" } },
-    },
+    orgs.grant("read", { on: ALL, where: { status: "active" } }),
   ]).context({ subject });
-  for (let i = 0; i < 10; i++) await scoped.can("orgs.read", [`org:${i}`]);
-  assertEquals(scoped.getFetchCounters(), { org: 10 });
+  for (let i = 0; i < 10; i++) await scoped.check("orgs.read", `org:${i}`);
+  assertEquals(scoped.fetchCounters(), { org: 10 });
 
   const mixed = make([
-    { key: "orgs.read", target: ["org:*"] },
-    {
-      key: "orgs.read",
-      target: ["org:*"],
-      with: { org: { status: "active" } },
-    },
+    orgs.grant("read", { on: ALL }),
+    orgs.grant("read", { on: ALL, where: { status: "active" } }),
   ]).context({ subject });
-  await mixed.can("orgs.read", ["org:1"]);
-  assertEquals(mixed.getFetchCounters(), { org: 1 });
+  await mixed.check("orgs.read", "org:1");
+  assertEquals(mixed.fetchCounters(), { org: 1 });
 });
 
-test("another rule on the same resource still gets its data", async () => {
+test("another rule on the same document still gets its data", async () => {
+  const orgs = orgEntity({ verifyExists: true });
   const sys = createSystem({
-    schema: {
-      "orgs.read": permission({ target: target.required("org") }).rules([
-        orgOf.match(),
-        orgOf.requireTruthy(),
-      ]),
-    },
-    providers: [() => [{ key: "orgs.read", target: ["org:*"] }]],
+    permissions: [orgs],
+    providers: [() => [orgs.grant("read", { on: ALL })]],
   });
   const ctx = sys.context({ subject });
-  assertEquals((await ctx.can("orgs.read", ["org:1"])).ok, true);
-  assertEquals(ctx.getFetchCounters(), { org: 1 });
+  assertEquals((await ctx.check("orgs.read", "org:1")).ok, true);
+  assertEquals(ctx.fetchCounters(), { org: 1 });
 });
 
-test("an indirect is read only for a grant that constrains it", async () => {
+test("a relation is read only for a grant that constrains it", async () => {
   let joinReads = 0;
-  const participantOf = resource({
-    id: "participant",
-    fetch: ({ target }) => ({ _id: target[0] }),
-    dedupKey: ({ target }) => target[0] as string,
-  });
-  const membershipsOf = indirectResource({
-    id: "memberships",
-    from: participantOf,
-    on: { localField: "_id", foreignField: "participantId" },
-    cardinality: "many",
-    fetch: () => {
-      joinReads++;
-      return [{ organizationId: "org:acme" }];
+  const participant = entity<{ readonly _id: string }, "memberships">(
+    "participant",
+    {
+      load: (id) => ({ _id: id }),
+      relations: {
+        memberships: {
+          localField: "_id",
+          foreignField: "participantId",
+          load: () => {
+            joinReads++;
+            return [{ organizationId: "org:acme" }];
+          },
+        },
+      },
     },
+  );
+  const participants = permissions(participant, "participants", {
+    read: action(),
   });
   const make = (grant: Grant) =>
     createSystem({
-      schema: {
-        "participants.read": permission({
-          target: target.required("participant"),
-        }).rules([participantOf.match(), membershipsOf.match()]),
-      },
+      permissions: [participants],
       providers: [() => [grant]],
     }).context({ subject });
 
-  const open = make({ key: "participants.read", target: ["participant:*"] });
+  const open = make(participants.grant("read", { on: ALL }));
   for (let i = 0; i < 5; i++) {
     assertEquals(
-      (await open.can("participants.read", [`participant:${i}`])).ok,
+      (await open.check("participants.read", `participant:${i}`)).ok,
       true,
     );
   }
-  assertEquals(open.getFetchCounters(), {});
+  assertEquals(open.fetchCounters(), {});
   assertEquals(joinReads, 0);
 
-  const scoped = make({
-    key: "participants.read",
-    target: ["participant:*"],
-    with: { memberships: { organizationId: "org:acme" } },
-  });
+  const scoped = make(
+    participants.grant("read", {
+      on: ALL,
+      related: { memberships: { organizationId: "org:acme" } },
+    }),
+  );
   assertEquals(
-    (await scoped.can("participants.read", ["participant:1"])).ok,
+    (await scoped.check("participants.read", "participant:1")).ok,
     true,
   );
-  assertEquals(scoped.getFetchCounters(), { participant: 1 });
+  assertEquals(scoped.fetchCounters(), { participant: 1 });
   assertEquals(joinReads, 1);
 });
 
 test("a read that nothing consults can no longer fail the check", async () => {
-  const brokenOf = resource({
-    id: "broken",
-    fetch: () => {
+  const thing = entity<{ readonly a: number }>("thing", {
+    load: () => {
       throw new Error("db down");
     },
   });
+  const things = permissions(thing, "things", { read: action() });
   const make = (grant: Grant) =>
-    createSystem({
-      schema: {
-        "things.read": permission({ target: target.required("thing") }).rules([
-          brokenOf.match(),
-        ]),
-      },
-      providers: [() => [grant]],
-    });
+    createSystem({ permissions: [things], providers: [() => [grant]] });
   assertEquals(
     (
-      await make({ key: "things.read", target: ["thing:*"] }).can(
-        subject,
-        "things.read",
-        ["thing:1"],
-      )
+      await make(things.grant("read", { on: ALL }))
+        .context({ subject })
+        .check("things.read", "thing:1")
     ).ok,
     true,
   );
-  const scoped = await make({
-    id: "g",
-    key: "things.read",
-    target: ["thing:*"],
-    with: { broken: { a: 1 } },
-  }).can(subject, "things.read", ["thing:1"]);
+  const scoped = await make(
+    things.grant("read", { id: "g", on: ALL, where: { a: 1 } }),
+  )
+    .context({ subject })
+    .check("things.read", "thing:1");
   assertEquals(scoped, {
     ok: false,
     reasons: ["[g] rule evaluation failed: db down"],
   });
 });
 
-test("defineRule accepts fetchWhen for custom rules", async () => {
+test("a custom rule reads its document only for a grant that needs it", async () => {
   let reads = 0;
-  const docOf = resource({
-    id: "doc",
-    fetch: () => {
+  const doc = entity<{ readonly level: number }>("doc", {
+    load: () => {
       reads++;
       return { level: 3 };
     },
   });
   const minLevel = defineRule({
-    kind: "min-level",
-    needs: [docOf] as const,
-    fetchWhen: (grant) => typeof grant.payload === "number",
-    check: ([doc], payload) =>
-      typeof payload !== "number" ||
-      (doc as { level: number }).level >= payload,
+    name: "min-level",
+    perDocument: true,
+    async check(context) {
+      const payload = context.grant.payload;
+      if (typeof payload !== "number") return true;
+      const loaded = await context.doc();
+      return (
+        typeof loaded === "object" &&
+        loaded !== null &&
+        "level" in loaded &&
+        typeof loaded.level === "number" &&
+        loaded.level >= payload
+      );
+    },
+  });
+  const docs = permissions(doc, "docs", {
+    read: action({ rules: [minLevel] }),
   });
   const sys = createSystem({
-    schema: {
-      "docs.read": permission({ target: target.required("doc") }).rules([
-        minLevel,
-      ]),
-    },
+    permissions: [docs],
     providers: [
       (_s, _k, t) =>
         t?.[0] === "doc:strict"
-          ? [{ key: "docs.read", target: ["doc:*"], payload: 5 }]
-          : [{ key: "docs.read", target: ["doc:*"] }],
+          ? [docs.grant("read", { on: ALL, payload: 5 })]
+          : [docs.grant("read", { on: ALL })],
     ],
   });
-  assertEquals((await sys.can(subject, "docs.read", ["doc:open"])).ok, true);
+  assertEquals(
+    (await sys.context({ subject }).check("docs.read", "doc:open")).ok,
+    true,
+  );
   assertEquals(reads, 0);
-  assertEquals((await sys.can(subject, "docs.read", ["doc:strict"])).ok, false);
+  assertEquals(
+    (await sys.context({ subject }).check("docs.read", "doc:strict")).ok,
+    false,
+  );
   assertEquals(reads, 1);
 });

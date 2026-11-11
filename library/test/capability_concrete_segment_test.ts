@@ -1,28 +1,11 @@
-/**
- * Tests for the cap-mode fetch-when-concrete behaviour with auto-binding
- * via `resource.id === segment.name` convention.
- *
- * Without this, a rule like `expositionInfoOf.match()` in a listing of
- * participants would silent-pass and emit a `{ entreprise: tenantId }`
- * constraint applied to the participant collection — wrong. With the
- * auto-binding, the engine fetches the exposition doc (concrete segment
- * 0), evaluates the spec against it, and denies the grant if the
- * exposition doesn't belong to the user's tenant.
- *
- * Auto-binding by convention : `resource.id === segment.name`. No opt-in
- * required — just respect the naming.
- */
-
 import { test } from "node:test";
-import { assertEquals } from "./+assert.ts";
-import { createSystem, permission, resource, target } from "../mod.ts";
+import { ALL, action, createSystem, entity, permissions } from "../mod.ts";
+import { assert, assertEquals } from "./+assert.ts";
 
-interface ExpoDoc {
-  readonly _id: string;
-  readonly entreprise: string;
-}
+type ExpoDoc = { readonly _id: string; readonly entreprise: string };
+type OrgDoc = { readonly _id: string; readonly kind: string };
 
-const EXPOS: Record<string, ExpoDoc> = {
+const EXPOS: Readonly<Record<string, ExpoDoc>> = {
   "exposition:beta-owned": {
     _id: "exposition:beta-owned",
     entreprise: "entreprise:beta",
@@ -33,271 +16,149 @@ const EXPOS: Record<string, ExpoDoc> = {
   },
 };
 
-test("cap-mode auto-fetch — concrete segment matching resource.id is fetched + evaluated", async () => {
-  let fetchCount = 0;
-  const expoOf = resource({
-    id: "exposition", // ← matches `target.path("exposition", ...)` segment 0
-    fetch: ({ target }) => {
-      fetchCount += 1;
-      return EXPOS[target[0] as string] ?? null;
+function participantsSystem() {
+  const counter = { fetches: 0 };
+  const exposition = entity("exposition", {
+    load: (id): ExpoDoc | null => {
+      counter.fetches += 1;
+      return EXPOS[id] ?? null;
     },
-    dedupKey: ({ target }) => target[0] as string,
   });
-
-  // 2-seg permission : target[0]=expo (concrete), target[1]=participant (wildcard in cap mode)
-  const sys = createSystem({
-    schema: {
-      "participants.list": permission({
-        target: target.path("exposition", "participant"),
-      }).rules([expoOf.match()]),
-    },
+  const participant = exposition.child<{ _id: string }>("participant", {});
+  const participants = permissions(participant, "participants", {
+    list: action(),
+  });
+  const system = createSystem({
+    permissions: [participants],
     providers: [
       () => [
-        {
+        participants.grant("list", {
           id: "g-entreprise-beta",
-          key: "participants.list",
-          target: ["exposition:*", "participant:*"],
-          with: { exposition: { entreprise: "entreprise:beta" } },
-        },
+          on: ALL,
+          parents: { exposition: { entreprise: "entreprise:beta" } },
+        }),
       ],
     ],
   });
+  return { counter, system };
+}
 
-  // Listing participants of an expo OWNED by Beta → grant valid.
-  const r1 = await sys
-    .context({ subject: { id: "user:lucas" } })
-    .can("participants.list", ["exposition:beta-owned", "participant:*"]);
-  assertEquals(r1.ok, true, "Beta's expo should pass");
+test("capability with a concrete parent: the parent is loaded and its condition evaluated", async () => {
+  const { counter, system } = participantsSystem();
+  const ctx = system.context({ subject: { id: "user:lucas" } });
+
   assertEquals(
-    fetchCount > 0,
+    await ctx.could("participants.list", "exposition:beta-owned"),
     true,
-    "expoOf should have been fetched in cap mode",
+    "Beta's expo should pass",
   );
-  // Constraint NOT emitted FROM the rule itself — the engine still
-  // pushes `{}` (any-wins) because there ARE match rules, preserving
-  // the listWithPermission semantic.
-  if (r1.ok) {
-    assertEquals(r1.constraints, {});
-  }
-
-  // Listing participants of an expo NOT owned by Beta → grant denied.
-  const r2 = await sys
-    .context({ subject: { id: "user:lucas" } })
-    .can("participants.list", ["exposition:globex-owned", "participant:*"]);
   assertEquals(
-    r2.ok,
+    counter.fetches > 0,
+    true,
+    "the exposition should have been loaded",
+  );
+  const scope = await ctx.scope("participants.list", "exposition:beta-owned");
+  assert(scope.ok);
+  assertEquals(scope.query.filter, {});
+  assertEquals(scope.query.stages, null);
+
+  assertEquals(
+    await ctx.could("participants.list", "exposition:globex-owned"),
     false,
-    "Globex's expo should deny — Beta admin not authorized",
+    "Globex's expo should deny, Beta admin not authorized",
   );
 });
 
-test("cap-mode auto-fetch — full wildcard target keeps legacy silent-pass", async () => {
-  let fetchCount = 0;
-  const expoOf = resource({
-    id: "exposition",
-    fetch: ({ target }) => {
-      fetchCount += 1;
-      return EXPOS[target[0] as string] ?? null;
-    },
-    dedupKey: ({ target }) => target[0] as string,
-  });
+test("capability with every segment a wildcard: nothing is loaded and scope refuses the wildcard parent", async () => {
+  const { counter, system } = participantsSystem();
+  const ctx = system.context({ subject: { id: "user:lucas" } });
 
-  const sys = createSystem({
-    schema: {
-      "participants.list": permission({
-        target: target.path("exposition", "participant"),
-      }).rules([expoOf.match()]),
-    },
-    providers: [
-      () => [
-        {
-          id: "g",
-          key: "participants.list",
-          target: ["exposition:*", "participant:*"],
-          with: { exposition: { entreprise: "entreprise:beta" } },
-        },
-      ],
-    ],
-  });
-
-  const r = await sys
-    .context({ subject: { id: "user:lucas" } })
-    .can("participants.list", ["exposition:*", "participant:*"]);
-  assertEquals(r.ok, true);
-  assertEquals(fetchCount, 0, "no fetch when target[0] is also wildcard");
-  // Legacy : constraint emitted from `with.exposition` spec.
-  if (r.ok) {
-    assertEquals(r.constraints, { entreprise: "entreprise:beta" });
-  }
+  assertEquals(await ctx.could("participants.list"), true);
+  assertEquals(counter.fetches, 0, "no load when the parent is a wildcard");
+  const scope = await ctx.scope("participants.list", "exposition:*");
+  assert(!scope.ok);
+  assertEquals(scope.reasons, [
+    "scope(participants.list) needs 1 concrete parent ids",
+  ]);
 });
 
-test("cap-mode auto-fetch — 3-seg perm with mixed concrete/wildcard fetches each independently", async () => {
-  interface OrgDoc {
-    readonly _id: string;
-    readonly kind: string;
-  }
-  const ORGS: Record<string, OrgDoc> = {
+test("capability over three segments, two concrete: each concrete one is loaded once", async () => {
+  const ORGS: Readonly<Record<string, OrgDoc>> = {
     "org:exhibitor-1": { _id: "org:exhibitor-1", kind: "exhibitor" },
     "org:sponsor-1": { _id: "org:sponsor-1", kind: "sponsor" },
   };
-  let expoFetchCount = 0;
-  let orgFetchCount = 0;
-  let roleFetchCount = 0;
-
-  const expoOf = resource({
-    id: "exposition",
-    fetch: ({ target }) => {
-      expoFetchCount += 1;
-      return EXPOS[target[0] as string] ?? null;
+  const counts = { expo: 0, org: 0, role: 0 };
+  const exposition = entity("exposition", {
+    load: (id): ExpoDoc | null => {
+      counts.expo += 1;
+      return EXPOS[id] ?? null;
     },
-    dedupKey: ({ target }) => target[0] as string,
   });
-  const orgOf = resource({
-    id: "org",
-    fetch: ({ target }) => {
-      orgFetchCount += 1;
-      return ORGS[target[1] as string] ?? null;
+  const org = exposition.child("org", {
+    load: (_expo, id): OrgDoc | null => {
+      counts.org += 1;
+      return ORGS[id] ?? null;
     },
-    dedupKey: ({ target }) => `${target[0]}::${target[1]}`,
   });
-  const roleOf = resource({
-    id: "role",
-    fetch: () => {
-      roleFetchCount += 1;
+  const role = org.child("role", {
+    load: (): { _id: string } | null => {
+      counts.role += 1;
       return null;
     },
-    dedupKey: ({ target }) => `${target[0]}::${target[1]}::${target[2]}`,
   });
-
-  const sys = createSystem({
-    schema: {
-      "expo.orgs.roles.read": permission({
-        target: target.path("exposition", "org", "role"),
-      }).rules([expoOf.match(), orgOf.match(), roleOf.match()]),
-    },
+  const roles = permissions(role, "expo.orgs.roles", { read: action() });
+  const system = createSystem({
+    permissions: [roles],
     providers: [
       () => [
-        {
+        roles.grant("read", {
           id: "g",
-          key: "expo.orgs.roles.read",
-          target: ["exposition:*", "org:*", "role:*"],
-          with: {
+          on: ALL,
+          parents: {
             exposition: { entreprise: "entreprise:beta" },
             org: { kind: "exhibitor" },
           },
-        },
+        }),
       ],
     ],
   });
 
-  // target = [concret, concret, wildcard]
-  const r = await sys
+  const result = await system
     .context({ subject: { id: "user:lucas" } })
-    .can("expo.orgs.roles.read", [
-      "exposition:beta-owned",
-      "org:exhibitor-1",
-      "role:*",
-    ]);
-  assertEquals(r.ok, true);
-  assertEquals(expoFetchCount, 1, "expo fetched (seg 0 concrete)");
-  assertEquals(orgFetchCount, 1, "org fetched (seg 1 concrete)");
-  assertEquals(roleFetchCount, 0, "role NOT fetched (seg 2 wildcard)");
+    .could("expo.orgs.roles.read", "exposition:beta-owned", "org:exhibitor-1");
+  assertEquals(result, true);
+  assertEquals(counts.expo, 1, "exposition loaded (segment 0 concrete)");
+  assertEquals(counts.org, 1, "org loaded (segment 1 concrete)");
+  assertEquals(counts.role, 0, "role not loaded (segment 2 wildcard)");
 });
 
-test("cap-mode auto-fetch — denies when one resource fails its check", async () => {
-  interface OrgDoc {
-    readonly _id: string;
-    readonly kind: string;
-  }
-  const ORGS: Record<string, OrgDoc> = {
+test("concrete check: denies when one document fails its condition", async () => {
+  const ORGS: Readonly<Record<string, OrgDoc>> = {
     "org:sponsor-1": { _id: "org:sponsor-1", kind: "sponsor" },
   };
-
-  const expoOf = resource({
-    id: "exposition",
-    fetch: ({ target }) => EXPOS[target[0] as string] ?? null,
-    dedupKey: ({ target }) => target[0] as string,
+  const exposition = entity("exposition", {
+    load: (id): ExpoDoc | null => EXPOS[id] ?? null,
   });
-  const orgOf = resource({
-    id: "org",
-    fetch: ({ target }) => ORGS[target[1] as string] ?? null,
-    dedupKey: ({ target }) => `${target[0]}::${target[1]}`,
+  const org = exposition.child("org", {
+    load: (_expo, id): OrgDoc | null => ORGS[id] ?? null,
   });
-
-  const sys = createSystem({
-    schema: {
-      "expo.orgs.read": permission({
-        target: target.path("exposition", "org"),
-      }).rules([expoOf.match(), orgOf.match()]),
-    },
+  const orgs = permissions(org, "expo.orgs", { read: action() });
+  const system = createSystem({
+    permissions: [orgs],
     providers: [
       () => [
-        {
+        orgs.grant("read", {
           id: "g",
-          key: "expo.orgs.read",
-          target: ["exposition:*", "org:*"],
-          with: {
-            exposition: { entreprise: "entreprise:beta" },
-            org: { kind: "exhibitor" },
-          },
-        },
+          on: ALL,
+          where: { kind: "exhibitor" },
+          parents: { exposition: { entreprise: "entreprise:beta" } },
+        }),
       ],
     ],
   });
 
-  // expo MATCHES (entreprise: beta) but org is sponsor (not exhibitor)
-  // → grant denied.
-  const r = await sys
+  const result = await system
     .context({ subject: { id: "user:lucas" } })
-    .can("expo.orgs.read", ["exposition:beta-owned", "org:sponsor-1"]);
-  assertEquals(r.ok, false);
-});
-
-test("cap-mode auto-fetch — resource.id with no matching segment → legacy silent-pass", async () => {
-  // Backward-compat check : a resource whose id matches NO segment of
-  // the permission's target keeps its legacy cap-mode behaviour
-  // (silent-pass + constraint emit).
-  let fetchCount = 0;
-  const auxOf = resource({
-    id: "auxiliary", // ← does NOT match the segment of target.required("user")
-    fetch: () => {
-      fetchCount += 1;
-      return { _id: "stub" };
-    },
-    dedupKey: () => "stub",
-  });
-
-  const sys = createSystem({
-    schema: {
-      "users.read": permission({ target: target.required("user") }).rules([
-        auxOf.match(),
-      ]),
-    },
-    providers: [
-      () => [
-        {
-          id: "g",
-          key: "users.read",
-          target: ["user:*"],
-          with: { auxiliary: { role: "admin" } },
-        },
-      ],
-    ],
-  });
-
-  // Wildcard target → cap-mode. auxOf.id="auxiliary" doesn't match the
-  // segment name "user" → no auto-fetch. The rule silent-passes + emits
-  // the spec as constraint (legacy behaviour).
-  const r = await sys
-    .context({ subject: { id: "user:lucas" } })
-    .can("users.read", ["user:*"]);
-  assertEquals(r.ok, true);
-  assertEquals(
-    fetchCount,
-    0,
-    "no fetch — id matches no segment, legacy preserved",
-  );
-  if (r.ok) {
-    assertEquals(r.constraints, { role: "admin" });
-  }
+    .check("expo.orgs.read", "exposition:beta-owned", "org:sponsor-1");
+  assertEquals(result.ok, false);
 });
