@@ -27,10 +27,15 @@ import {
   type IndirectResource,
 } from "./indirect-resource.ts";
 
+export type ProviderAccess = {
+  read<T>(resource: Resource<T>): Promise<T>;
+};
+
 export type ProviderFn = (
   subject: Subject,
   key: string,
   target?: readonly unknown[],
+  access?: ProviderAccess,
 ) => readonly Grant[] | Promise<readonly Grant[]>;
 
 export type ProviderObject = {
@@ -719,6 +724,7 @@ export function createSystem<TMeta = unknown>(opts: {
     subject: Subject,
     key: string,
     target: readonly unknown[] | undefined,
+    access: ProviderAccess,
   ): Promise<ProviderOutcome> {
     const onFetch = hooks.onProviderFetch;
     const started = onFetch ? performance.now() : 0;
@@ -726,8 +732,8 @@ export function createSystem<TMeta = unknown>(opts: {
     try {
       grants =
         typeof provider === "function"
-          ? await provider(subject, key, target)
-          : await provider.fetch(subject, key, target);
+          ? await provider(subject, key, target, access)
+          : await provider.fetch(subject, key, target, access);
     } catch (error) {
       reportError({
         source: "provider",
@@ -763,6 +769,7 @@ export function createSystem<TMeta = unknown>(opts: {
     key: string,
     target: readonly unknown[] | undefined,
     state: ContextState | undefined,
+    access: ProviderAccess,
   ): Promise<ProviderOutcome> {
     const name = providerNames.get(provider) ?? "provider";
     let ck: string | undefined;
@@ -786,7 +793,7 @@ export function createSystem<TMeta = unknown>(opts: {
       };
     }
     if (!state || !ck) {
-      return fetchFromProvider(provider, name, subject, key, target);
+      return fetchFromProvider(provider, name, subject, key, target, access);
     }
     let byKey = state.grantsCache.get(provider);
     if (!byKey) {
@@ -795,7 +802,7 @@ export function createSystem<TMeta = unknown>(opts: {
     }
     let pending = byKey.get(ck);
     if (!pending) {
-      pending = fetchFromProvider(provider, name, subject, key, target);
+      pending = fetchFromProvider(provider, name, subject, key, target, access);
       byKey.set(ck, pending);
     }
     return pending;
@@ -907,9 +914,18 @@ export function createSystem<TMeta = unknown>(opts: {
       }
       consulted.push(provider);
     }
+    const capability = isCapabilityQuery(target);
+    const access: ProviderAccess = {
+      read: (wanted) =>
+        fetchResource(
+          wanted as Resource<unknown>,
+          { subject, target: target ?? [], grant: { key }, capability },
+          state,
+        ) as Promise<never>,
+    };
     const outcomes = await Promise.all(
       consulted.map((provider) =>
-        invokeProvider(provider, subject, key, target, state),
+        invokeProvider(provider, subject, key, target, state, access),
       ),
     );
     const failures: string[] = [];
@@ -924,7 +940,6 @@ export function createSystem<TMeta = unknown>(opts: {
       if (list) forKey.push(list);
     }
 
-    const capability = isCapabilityQuery(target);
     const matching: Grant[] = [];
     if (forKey.length > 0) {
       for (const { grant } of mergeByDepth(forKey)) {

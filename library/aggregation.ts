@@ -65,9 +65,50 @@ export function projectFields(
   const out: Record<string, unknown> = {};
   const src = source as Record<string, unknown>;
   for (const [k, v] of Object.entries(fields)) {
-    if (v === true && k in src) out[k] = src[k];
+    if (v !== true) continue;
+    if (k in src) out[k] = src[k];
+    else if (k.includes(".")) copyPath(src, out, k.split("."), 0);
   }
   return out;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function copyPath(
+  src: Record<string, unknown>,
+  out: Record<string, unknown>,
+  parts: readonly string[],
+  index: number,
+): void {
+  const head = parts[index];
+  if (!(head in src)) return;
+  const value = src[head];
+  if (index === parts.length - 1) {
+    out[head] = value;
+    return;
+  }
+  if (out[head] === value) return;
+  if (Array.isArray(value)) {
+    const known = out[head];
+    const items: unknown[] = Array.isArray(known)
+      ? known
+      : value.map((item) => (isPlainObject(item) ? {} : null));
+    for (const [position, item] of value.entries()) {
+      const slot = items[position];
+      if (isPlainObject(item) && isPlainObject(slot)) {
+        copyPath(item, slot, parts, index + 1);
+      }
+    }
+    out[head] = items;
+    return;
+  }
+  if (!isPlainObject(value)) return;
+  const known = out[head];
+  const nested = isPlainObject(known) ? known : {};
+  copyPath(value, nested, parts, index + 1);
+  out[head] = nested;
 }
 
 /**

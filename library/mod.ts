@@ -77,6 +77,7 @@ export type {
   CanContext,
   PermissionErrorEvent,
   Provider,
+  ProviderAccess,
   ProviderFetchEvent,
   ProviderFn,
   ProviderObject,

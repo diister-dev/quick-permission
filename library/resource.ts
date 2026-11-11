@@ -31,6 +31,7 @@
 import type { FetchCtx, Grant, Resource, Rule } from "./types.ts";
 import { deepEqual, defineRule } from "./rules.ts";
 import { prepareSpec } from "./mongo-query.ts";
+import { projectFields } from "./aggregation.ts";
 
 class ResourceImpl<T> implements Resource<T> {
   // Spelled out rather than declared as constructor parameter properties:
@@ -175,15 +176,9 @@ class ResourceImpl<T> implements Resource<T> {
         ) {
           return { ok: true, data: sub, filter: { source: sub, spec: null } };
         }
-        const out: Record<string, unknown> = {};
-        for (const [k, v] of Object.entries(filter)) {
-          if (v === true && k in (sub as Record<string, unknown>)) {
-            out[k] = (sub as Record<string, unknown>)[k];
-          }
-        }
         return {
           ok: true,
-          data: out,
+          data: projectFields(sub, filter),
           filter: { source: sub, spec: filter },
         };
       },
